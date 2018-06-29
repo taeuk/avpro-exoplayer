@@ -1,0 +1,3 @@
+include ':AVProVideoAmaze', ':AVProVideo'
+rootProject.name = 'com.off2.amaze'
+
