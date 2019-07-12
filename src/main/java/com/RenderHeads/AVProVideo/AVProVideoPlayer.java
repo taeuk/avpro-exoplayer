@@ -65,6 +65,10 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     protected static final int VideoState_Stopped = 6;
     protected static final int VideoState_Paused = 7;
     protected static final int VideoState_Finished = 8;
+    protected static final int Format_Unknown = 0;
+    protected static final int Format_HLS = 1;
+    protected static final int Format_Dash = 2;
+    protected static final int Format_SS = 3;
     protected int m_VideoState;
     protected boolean m_bVideo_CreateRenderSurface;
     protected boolean m_bVideo_DestroyRenderSurface;
@@ -95,7 +99,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     protected final ReentrantLock _mutex = new ReentrantLock();
     protected Random m_Random;
 
-    protected abstract boolean InitialisePlayer(boolean var1, int var2);
+    protected abstract boolean InitialisePlayer(boolean var1, int var2, boolean var3);
 
     protected abstract void CloseVideoOnPlayer();
 
@@ -111,7 +115,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
 
     public abstract boolean CanPlay();
 
-    protected abstract boolean OpenVideoFromFileInternal(String var1, long var2, String var4);
+    protected abstract boolean OpenVideoFromFileInternal(String var1, long var2, String var4, int var5);
 
     public abstract void SetLooping(boolean var1);
 
@@ -197,7 +201,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_fSourceVideoFrameRate = 0.0F;
         this.m_DisplayRate_FrameRate = 0.0F;
         this.m_DisplayRate_NumberFrames = 0L;
-        this.m_DisplayRate_LastSystemTimeMS = System.currentTimeMillis();
+        this.m_DisplayRate_LastSystemTimeMS = System.nanoTime();
         this.m_bDeinitialiseFlagged = false;
         this.m_bDeinitialised = false;
         this.m_iLastError = 0;
@@ -207,7 +211,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_Random = random != null ? new Random() : random;
     }
 
-    public boolean Initialise(Context context, boolean useOesRenderingPath, boolean enableAudio360, int audio360Channels) {
+    public boolean Initialise(Context context, boolean useOesRenderingPath, boolean enableAudio360, int audio360Channels, boolean preferSoftware) {
         if (this.m_bWatermarked) {
             if (!s_bCompressedWatermarkDataGood) {
                 return false;
@@ -240,7 +244,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         }
 
         this.SetPlayerOptions(useOesRenderingPath, this.m_bShowPosterFrame);
-        return this.InitialisePlayer(enableAudio360, audio360Channels);
+        return this.InitialisePlayer(enableAudio360, audio360Channels, preferSoftware);
     }
 
     public boolean StartExtractFrame() {
@@ -323,7 +327,15 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
 
     public void Deinitialise() {
         this.CloseVideo();
+        if (this.m_CommandQueue != null) {
+            this.m_CommandQueue.clear();
+            this.m_CommandQueue = null;
+        }
+
         this.DeinitializeVideoPlayer();
+    }
+
+    public void DeinitialiseRender() {
         if (this.m_GlRender_Video != null) {
             this.m_GlRender_Video.Destroy();
             this.m_GlRender_Video = null;
@@ -338,11 +350,6 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
             this.m_SurfaceTexture.setOnFrameAvailableListener((OnFrameAvailableListener)null);
             this.m_SurfaceTexture.release();
             this.m_SurfaceTexture = null;
-        }
-
-        if (this.m_CommandQueue != null) {
-            this.m_CommandQueue.clear();
-            this.m_CommandQueue = null;
         }
 
         this.m_WatermarkPosition = null;
@@ -376,7 +383,6 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
                 this.m_GlRender_Watermark.Setup(254, 141, AVProMobileWMImage.s_aImageData, false, this.m_bCanUseGLBindVertexArray, false);
             }
 
-            this.PlayerRendererSetup();
         }
     }
 
@@ -386,6 +392,24 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
 
     public int GetTextureHandle() {
         return this.m_GlRender_Video != null && this.m_bVideo_RenderSurfaceCreated && !this.m_bVideo_DestroyRenderSurface ? this.m_GlRender_Video.GetGlTextureHandle(false) : 0;
+    }
+
+    public float[] GetTextureTransform() {
+        if (this.m_GlRender_Video != null && this.m_SurfaceTexture != null && this.m_bVideo_RenderSurfaceCreated && !this.m_bVideo_DestroyRenderSurface) {
+            float[] matrix = new float[16];
+            this.m_SurfaceTexture.getTransformMatrix(matrix);
+            System.out.println("Matrix " + matrix[0] + "," + matrix[1] + "," + matrix[2] + "," + matrix[3] + " " + matrix[4] + "," + matrix[5] + "," + matrix[6] + "," + matrix[7] + " " + matrix[8] + "," + matrix[9] + "," + matrix[10] + "," + matrix[11] + " " + matrix[12] + "," + matrix[13] + "," + matrix[14] + "," + matrix[15]);
+            float[] result;
+            (result = new float[6])[4] = Math.signum(matrix[0]);
+            result[2] = -Math.signum(matrix[1]);
+            result[1] = Math.signum(matrix[4]);
+            result[0] = -Math.signum(matrix[5]);
+            result[4] = 0.0F;
+            result[5] = 0.0F;
+            return null;
+        } else {
+            return null;
+        }
     }
 
     public int GetLastErrorCode() {
@@ -402,7 +426,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_bShowPosterFrame = showPosterFrame;
     }
 
-    public boolean OpenVideoFromFile(String filePath, long fileOffset, String httpHeaderJson) {
+    public boolean OpenVideoFromFile(String filePath, long fileOffset, String httpHeaderJson, int forcedFileFormat) {
         this.CloseVideo();
         this.m_VideoState = 1;
         this.m_bVideo_CreateRenderSurface = false;
@@ -419,7 +443,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_bIsBuffering = false;
         this.m_bIsSeeking = false;
         this.m_fBufferingProgressPercent = 0.0F;
-        return this.OpenVideoFromFileInternal(filePath, fileOffset, httpHeaderJson);
+        return this.OpenVideoFromFileInternal(filePath, fileOffset, httpHeaderJson, forcedFileFormat);
     }
 
     public boolean IsLooping() {
@@ -479,22 +503,35 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     }
 
     public void Play() {
+        this.RemoveDuplicateCommand(VideoCommand_Stop);
+        this.RemoveDuplicateCommand(VideoCommand_Play);
+        this.RemoveDuplicateCommand(VideoCommand_Pause);
         this.AddVideoCommandInt(VideoCommand_Play, 0);
     }
 
     public void Pause() {
+        this.RemoveDuplicateCommand(VideoCommand_Stop);
+        this.RemoveDuplicateCommand(VideoCommand_Play);
+        this.RemoveDuplicateCommand(VideoCommand_Pause);
         this.AddVideoCommandInt(VideoCommand_Pause, 0);
     }
 
     public void Stop() {
+        this.RemoveDuplicateCommand(VideoCommand_Stop);
+        this.RemoveDuplicateCommand(VideoCommand_Play);
+        this.RemoveDuplicateCommand(VideoCommand_Pause);
         this.AddVideoCommandInt(VideoCommand_Stop, 0);
     }
 
     public void Seek(int timeMs) {
+        this.RemoveDuplicateCommand(VideoCommand_Seek);
+        this.RemoveDuplicateCommand(VideoCommand_SeekFast);
         this.AddVideoCommandInt(VideoCommand_Seek, timeMs);
     }
 
     public void SeekFast(int timeMs) {
+        this.RemoveDuplicateCommand(VideoCommand_Seek);
+        this.RemoveDuplicateCommand(VideoCommand_SeekFast);
         this.AddVideoCommandInt(VideoCommand_SeekFast, timeMs);
     }
 
@@ -604,9 +641,13 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
 
     }
 
+    public void Update() {
+        this.PlayerRenderUpdate();
+        this.UpdateCommandQueue();
+    }
+
     public boolean Render() {
         boolean result = false;
-        this.PlayerRenderUpdate();
         if (this.m_bDeinitialiseFlagged) {
             return false;
         } else {
@@ -637,12 +678,6 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
                             this.m_VideoState = 6;
                         }
                     }
-
-                    this.SetVolume(this.m_AudioVolume);
-                } else {
-                    this._mutex.lock();
-                    this.UpdateCommandQueue();
-                    this._mutex.unlock();
                 }
 
                 synchronized(this) {

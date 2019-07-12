@@ -18,16 +18,16 @@ public final class JarDataSource implements DataSource {
     private static final String[] extensions = new String[]{"obb!/", "apk!/"};
     private Uri m_Uri;
     private String m_Path;
+    private long m_FileOffset;
     private InputStream m_File;
-    private long m_Size;
     private ZipFile m_ZipFile;
 
-    public JarDataSource(String path) {
+    public JarDataSource(String path, long fileOffset) {
         this.m_Path = path;
+        this.m_FileOffset = fileOffset;
         this.m_Uri = Uri.parse(path);
         this.m_File = null;
         this.m_ZipFile = null;
-        this.m_Size = 0L;
     }
 
     public final void close() {
@@ -49,7 +49,6 @@ public final class JarDataSource implements DataSource {
 
         this.m_ZipFile = null;
         this.m_File = null;
-        this.m_Size = 0L;
     }
 
     public final Uri getUri() {
@@ -67,6 +66,7 @@ public final class JarDataSource implements DataSource {
                     String zipPathName = this.m_Path.substring(11, iIndexIntoString + lookFor.length() - 2);
                     String zipFileName = this.m_Path.substring(iIndexIntoString + lookFor.length());
 
+                    long fileSize;
                     try {
                         this.m_ZipFile = new ZipFile(zipPathName);
                         ZipEntry entry;
@@ -75,17 +75,17 @@ public final class JarDataSource implements DataSource {
                         }
 
                         this.m_File = this.m_ZipFile.getInputStream(entry);
-                        this.m_Size = entry.getSize();
-                        if (this.m_File.skip(dataSpec.position) < dataSpec.position) {
+                        fileSize = entry.getSize() - this.m_FileOffset;
+                        if (this.m_File.skip(dataSpec.position + this.m_FileOffset) < dataSpec.position) {
                             throw new AssetDataSourceException(new IOException("End of file reached"));
                         }
-                    } catch (IOException var8) {
-                        throw new AssetDataSourceException(var8);
+                    } catch (IOException var10) {
+                        throw new AssetDataSourceException(var10);
                     }
 
                     if (this.m_File != null) {
                         if (dataSpec.length == -1L) {
-                            return this.m_Size;
+                            return fileSize;
                         }
 
                         return dataSpec.length;

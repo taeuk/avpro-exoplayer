@@ -9,6 +9,7 @@ import android.content.res.AssetFileDescriptor;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.media.MediaPlayer;
+import android.media.PlaybackParams;
 import android.media.MediaPlayer.OnBufferingUpdateListener;
 import android.media.MediaPlayer.OnCompletionListener;
 import android.media.MediaPlayer.OnErrorListener;
@@ -16,16 +17,11 @@ import android.media.MediaPlayer.OnInfoListener;
 import android.media.MediaPlayer.OnPreparedListener;
 import android.media.MediaPlayer.OnVideoSizeChangedListener;
 import android.media.MediaPlayer.TrackInfo;
-import android.media.PlaybackParams;
 import android.net.Uri;
 import android.os.Build.VERSION;
 import android.view.Surface;
-
 import com.android.vending.expansion.zipfile.ZipResourceFile;
 import com.android.vending.expansion.zipfile.ZipResourceFile.ZipEntryRO;
-
-import org.json.JSONObject;
-
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -33,6 +29,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Random;
+import org.json.JSONObject;
 
 public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferingUpdateListener, OnCompletionListener, OnErrorListener, OnInfoListener, OnPreparedListener, OnVideoSizeChangedListener {
     private MediaPlayer m_MediaPlayer;
@@ -43,7 +40,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
         super(playerIndex, watermarked, random);
     }
 
-    protected boolean InitialisePlayer(boolean enableAudio360, int audio360Channels) {
+    protected boolean InitialisePlayer(boolean enableAudio360, int audio360Channels, boolean preferSoftware) {
         this.m_MediaPlayer = new MediaPlayer();
         this.m_aTrackInfo = null;
         return true;
@@ -132,7 +129,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
     public void SetFocusEnabled(boolean enabled) {
     }
 
-    protected boolean OpenVideoFromFileInternal(String filePath, long fileOffset, String httpHeaderJson) {
+    protected boolean OpenVideoFromFileInternal(String filePath, long fileOffset, String httpHeaderJson, int forcedFileFormat) {
         boolean bReturn = false;
         this.m_aTrackInfo = null;
         if (this.m_MediaPlayer != null) {
@@ -150,7 +147,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
                         String zipPathName = filePath.substring(11, iIndexIntoString + lookFor.length() - 2);
                         String zipFileName = filePath.substring(iIndexIntoString + lookFor.length());
                         this.setMediaPlayerDataSourceFromZip(zipPathName, zipFileName);
-                    } catch (IOException var17) {
+                    } catch (IOException var18) {
                         try {
                             String fileName = filePath.substring(filePath.lastIndexOf("/assets/") + 8);
                             AssetFileDescriptor assetFileDesc;
@@ -161,13 +158,13 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                                     try {
                                         this.m_MediaExtractor.setDataSource(assetFileDesc.getFileDescriptor(), assetFileDesc.getStartOffset() + fileOffset, assetFileDesc.getLength() - fileOffset);
-                                    } catch (IOException var14) {
+                                    } catch (IOException var15) {
                                         this.m_MediaExtractor.release();
                                         this.m_MediaExtractor = null;
                                     }
                                 }
                             }
-                        } catch (IOException var16) {
+                        } catch (IOException var17) {
                             try {
                                 FileDescriptor fileDescriptor;
                                 if (fileOffset == 0L) {
@@ -178,7 +175,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                                         try {
                                             this.m_MediaExtractor.setDataSource(fileDescriptor);
-                                        } catch (IOException var13) {
+                                        } catch (IOException var14) {
                                             this.m_MediaExtractor.release();
                                             this.m_MediaExtractor = null;
                                         }
@@ -192,13 +189,13 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                                         try {
                                             this.m_MediaExtractor.setDataSource(fileDescriptor, fileOffset, inputStream.getChannel().size() - fileOffset);
-                                        } catch (IOException var12) {
+                                        } catch (IOException var13) {
                                             this.m_MediaExtractor.release();
                                             this.m_MediaExtractor = null;
                                         }
                                     }
                                 }
-                            } catch (IOException var15) {
+                            } catch (IOException var16) {
                                 Uri uri = Uri.parse("file://" + filePath);
                                 this.m_MediaPlayer.setDataSource(this.m_Context, uri);
                                 if (VERSION.SDK_INT > 15) {
@@ -206,7 +203,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                                     try {
                                         this.m_MediaExtractor.setDataSource(this.m_Context, uri, (Map)null);
-                                    } catch (IOException var11) {
+                                    } catch (IOException var12) {
                                         this.m_MediaExtractor.release();
                                         this.m_MediaExtractor = null;
                                     }
@@ -225,8 +222,8 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                     this.m_bIsStream = true;
                 }
-            } catch (IOException var18) {
-                (new StringBuilder("Failed to open video file: ")).append(var18);
+            } catch (IOException var19) {
+                (new StringBuilder("Failed to open video file: ")).append(var19);
                 bFileGood = false;
             }
 
@@ -335,7 +332,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
     }
 
     protected void _stop() {
-        if (this.m_VideoState > 4) {
+        if (this.m_VideoState > 4 && this.m_VideoState < 6) {
             if (this.m_MediaPlayer != null) {
                 this.m_MediaPlayer.stop();
             }

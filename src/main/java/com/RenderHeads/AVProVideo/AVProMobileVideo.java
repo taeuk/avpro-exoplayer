@@ -9,17 +9,20 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.pm.ConfigurationInfo;
 import android.content.pm.FeatureInfo;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Map.Entry;
+import java.util.concurrent.locks.ReentrantLock;
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLContext;
 
 public class AVProMobileVideo {
     private final boolean m_bWatermarked = false;
-    private final String PLUGIN_VERSION = "1.8.0";
+    private final String PLUGIN_VERSION = "1.9.10";
     public static final int MEDIAPLAYER = 1;
     public static final int EXOPLAYER = 2;
     public static final int kUnityGfxRendererOpenGLES20 = 8;
@@ -31,12 +34,18 @@ public class AVProMobileVideo {
     private Context m_Context = null;
     private int m_iOpenGLVersion = -1;
     private static AVProMobileVideo s_Interface = null;
+    private static List<AVProVideoPlayer> _renderFree = new ArrayList();
+    private static final ReentrantLock _renderMutex = new ReentrantLock();
 
     public AVProMobileVideo() {
         if (s_Interface == null) {
             s_Interface = this;
         }
 
+    }
+
+    public static void Deinitialise() {
+        s_Interface = null;
     }
 
     public void SetContext(Context context) {
@@ -54,10 +63,10 @@ public class AVProMobileVideo {
     }
 
     public String GetPluginVersion() {
-        return "1.8.0";
+        return "1.9.10";
     }
 
-    public AVProVideoPlayer CreatePlayer(int api, boolean useOesRenderingPath, boolean enableAudio360, int audio360Channels) {
+    public AVProVideoPlayer CreatePlayer(int api, boolean useOesRenderingPath, boolean enableAudio360, int audio360Channels, boolean preferSoftware) {
         if (s_Interface != this) {
             return null;
         } else {
@@ -76,12 +85,12 @@ public class AVProMobileVideo {
                 switch(api) {
                     case 1:
                         AVProVideoMediaPlayer mediaplayer;
-                        (mediaplayer = new AVProVideoMediaPlayer(index, false, this.m_Random)).Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels);
+                        (mediaplayer = new AVProVideoMediaPlayer(index, false, this.m_Random)).Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels, preferSoftware);
                         this.m_Players.put(index, mediaplayer);
                         return (AVProVideoPlayer)this.m_Players.get(index);
                     case 2:
                         AVProVideoExoPlayer exoplayer;
-                        (exoplayer = new AVProVideoExoPlayer(index, false, this.m_Random)).Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels);
+                        (exoplayer = new AVProVideoExoPlayer(index, false, this.m_Random)).Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels, preferSoftware);
                         this.m_Players.put(index, exoplayer);
                         return (AVProVideoPlayer)this.m_Players.get(index);
                     default:
@@ -91,7 +100,19 @@ public class AVProMobileVideo {
         }
     }
 
-    public void RemovePlayer(int playerIndex) {
+    public void DestroyPlayer(int playerIndex) {
+        AVProVideoPlayer theClass;
+        if ((theClass = this.GetAVProClassForPlayerIndex(playerIndex)) != null) {
+            theClass.Deinitialise();
+            this.RemovePlayer(playerIndex);
+            _renderMutex.lock();
+            _renderFree.add(theClass);
+            _renderMutex.unlock();
+        }
+
+    }
+
+    private void RemovePlayer(int playerIndex) {
         if (this.m_Players.containsKey(playerIndex)) {
             this.m_Players.remove(playerIndex);
         }
@@ -139,7 +160,6 @@ public class AVProMobileVideo {
     public static void RendererSetupPlayer(int playerIndex, int iDeviceIndex) {
         if (s_Interface != null) {
             s_PreviousDeviceIndex = iDeviceIndex;
-            (new StringBuilder("RendererSetupPlayer called with index: ")).append(playerIndex).append(" | iDeviceIndex: ").append(iDeviceIndex);
             AVProVideoPlayer theClass;
             if ((theClass = s_Interface.GetAVProClassForPlayerIndex(playerIndex)) != null) {
                 int glesVersion = s_Interface.m_iOpenGLVersion;
@@ -155,15 +175,18 @@ public class AVProMobileVideo {
         }
     }
 
-    public static void RendererDestroyPlayer(int playerIndex) {
-        if (s_Interface != null) {
-            AVProVideoPlayer theClass;
-            if ((theClass = s_Interface.GetAVProClassForPlayerIndex(playerIndex)) != null) {
-                theClass.Deinitialise();
-            }
+    public static void RendererDestroyPlayers() {
+        _renderMutex.lock();
 
-            s_Interface.RemovePlayer(playerIndex);
+        for(int i = 0; i < _renderFree.size(); ++i) {
+            AVProVideoPlayer theClass;
+            if ((theClass = (AVProVideoPlayer)_renderFree.get(i)) != null) {
+                theClass.DeinitialiseRender();
+            }
         }
+
+        _renderFree.clear();
+        _renderMutex.unlock();
     }
 
     public static int _GetWidth(int playerIndex) {

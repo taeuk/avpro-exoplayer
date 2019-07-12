@@ -31,11 +31,13 @@ import com.google.android.exoplayer2.metadata.id3.UrlLinkFrame;
 import com.google.android.exoplayer2.source.AdaptiveMediaSourceEventListener;
 import com.google.android.exoplayer2.source.TrackGroup;
 import com.google.android.exoplayer2.source.TrackGroupArray;
+import com.google.android.exoplayer2.source.MediaSource.MediaPeriodId;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.LoadEventInfo;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.MediaLoadData;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector;
 import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector.MappedTrackInfo;
-import com.google.android.exoplayer2.upstream.DataSpec;
 import com.google.android.exoplayer2.video.VideoRendererEventListener;
 import java.io.IOException;
 import java.text.NumberFormat;
@@ -115,7 +117,7 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
     public final void onSeekProcessed() {
     }
 
-    public final void onTimelineChanged(Timeline timeline, Object manifest) {
+    public final void onTimelineChanged(Timeline timeline, Object manifest, int reason) {
         int periodCount = timeline.getPeriodCount();
         int windowCount = timeline.getWindowCount();
         (new StringBuilder("sourceInfo [periodCount=")).append(periodCount).append(", windowCount=").append(windowCount);
@@ -199,10 +201,10 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
                     (new StringBuilder("    Group:")).append(groupIndex).append(" [");
                     TrackGroup trackGroup = unassociatedTrackGroups.get(groupIndex);
 
-                    for(groupIndex = 0; groupIndex < trackGroup.length; ++groupIndex) {
+                    for(int groupIndex2 = 0; groupIndex2 < trackGroup.length; ++groupIndex2) {
                         String status = getTrackStatusString(false);
                         adaptiveSupport = getFormatSupportString(0);
-                        (new StringBuilder("      ")).append(status).append(" Track:").append(groupIndex).append(", ").append(Format.toLogString(trackGroup.getFormat(groupIndex))).append(", supported=").append(adaptiveSupport);
+                        (new StringBuilder("      ")).append(status).append(" Track:").append(groupIndex2).append(", ").append(Format.toLogString(trackGroup.getFormat(groupIndex2))).append(", supported=").append(adaptiveSupport);
                     }
                 }
             }
@@ -286,23 +288,32 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
         this.printInternalError("loadError", error);
     }
 
-    public final void onLoadStarted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs) {
+    public final void onLoadStarted(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
     }
 
-    public final void onLoadError(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded, IOException error, boolean wasCanceled) {
+    public final void onLoadError(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData, IOException error, boolean wasCanceled) {
         this.printInternalError("loadError", error);
     }
 
-    public final void onLoadCanceled(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
+    public final void onLoadCanceled(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
     }
 
-    public final void onLoadCompleted(DataSpec dataSpec, int dataType, int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaStartTimeMs, long mediaEndTimeMs, long elapsedRealtimeMs, long loadDurationMs, long bytesLoaded) {
+    public final void onLoadCompleted(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
     }
 
-    public final void onUpstreamDiscarded(int trackType, long mediaStartTimeMs, long mediaEndTimeMs) {
+    public final void onUpstreamDiscarded(int windowIndex, MediaPeriodId mediaPeriodId, MediaLoadData mediaLoadData) {
     }
 
-    public final void onDownstreamFormatChanged(int trackType, Format trackFormat, int trackSelectionReason, Object trackSelectionData, long mediaTimeMs) {
+    public final void onDownstreamFormatChanged(int windowIndex, MediaPeriodId mediaPeriodId, MediaLoadData mediaLoadData) {
+    }
+
+    public final void onReadingStarted(int windowIndex, MediaPeriodId mediaPeriodId) {
+    }
+
+    public final void onMediaPeriodCreated(int windowIndex, MediaPeriodId mediaPeriodId) {
+    }
+
+    public final void onMediaPeriodReleased(int windowIndex, MediaPeriodId mediaPeriodId) {
     }
 
     private void printInternalError(String type, Exception e) {
