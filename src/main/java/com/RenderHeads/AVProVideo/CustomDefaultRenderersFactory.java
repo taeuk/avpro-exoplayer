@@ -20,7 +20,7 @@ import com.google.android.exoplayer2.video.VideoRendererEventListener;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-public final class CustomDefaultRenderersFactory implements RenderersFactory {
+public class CustomDefaultRenderersFactory implements RenderersFactory {
     private boolean m_PreferSoftware;
     private CustomMediaCodecSelector m_CodecSelector;
     private RenderersFactory m_DefaultRenderersFactory;
@@ -28,16 +28,16 @@ public final class CustomDefaultRenderersFactory implements RenderersFactory {
     private int m_ExtensionRenderersMode;
     private DrmSessionManager<FrameworkMediaCrypto> m_DrmSessionManager;
 
-    public CustomDefaultRenderersFactory(Context context, boolean preferSoftware) {
+    public CustomDefaultRenderersFactory(Context context, DrmSessionManager<FrameworkMediaCrypto> drmSessionManager, int extensionRendererMode, boolean preferSoftware) {
         this.m_PreferSoftware = preferSoftware;
         this.m_CodecSelector = new CustomMediaCodecSelector(this.m_PreferSoftware);
-        this.m_DefaultRenderersFactory = new DefaultRenderersFactory(context, (DrmSessionManager)null, 1);
+        this.m_DefaultRenderersFactory = new DefaultRenderersFactory(context, drmSessionManager, extensionRendererMode);
         this.m_Context = context;
-        this.m_ExtensionRenderersMode = 1;
-        this.m_DrmSessionManager = null;
+        this.m_ExtensionRenderersMode = extensionRendererMode;
+        this.m_DrmSessionManager = drmSessionManager;
     }
 
-    public final Renderer[] createRenderers(Handler eventHandler, VideoRendererEventListener videoRendererEventListener, AudioRendererEventListener audioRendererEventListener, TextOutput textRendererOutput, MetadataOutput metadataRendererOutput, DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
+    public Renderer[] createRenderers(Handler eventHandler, VideoRendererEventListener videoRendererEventListener, AudioRendererEventListener audioRendererEventListener, TextOutput textRendererOutput, MetadataOutput metadataRendererOutput, DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
         Renderer[] defaultRenderers = this.m_DefaultRenderersFactory.createRenderers(eventHandler, videoRendererEventListener, audioRendererEventListener, textRendererOutput, metadataRendererOutput, drmSessionManager);
         if (!this.m_PreferSoftware) {
             return defaultRenderers;

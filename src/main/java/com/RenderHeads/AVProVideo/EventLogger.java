@@ -44,6 +44,8 @@ import java.text.NumberFormat;
 import java.util.Locale;
 
 final class EventLogger implements EventListener, AudioRendererEventListener, com.google.android.exoplayer2.drm.DefaultDrmSessionManager.EventListener, Output, AdaptiveMediaSourceEventListener, com.google.android.exoplayer2.source.ExtractorMediaSource.EventListener, VideoRendererEventListener {
+    private static final String TAG = "AVProVideo: EventLogger";
+    private static final int MAX_TIMELINE_ITEM_LINES = 3;
     private static final NumberFormat TIME_FORMAT;
     private final MappingTrackSelector trackSelector;
     private final Window window;
@@ -62,46 +64,11 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
     }
 
     public final void onPlayerStateChanged(boolean playWhenReady, int state) {
-        StringBuilder var10000 = (new StringBuilder("state [")).append(this.getSessionTimeString()).append(", ").append(playWhenReady).append(", ");
-        String var10001;
-        switch(state) {
-            case 1:
-                var10001 = "I";
-                break;
-            case 2:
-                var10001 = "B";
-                break;
-            case 3:
-                var10001 = "R";
-                break;
-            case 4:
-                var10001 = "E";
-                break;
-            default:
-                var10001 = "?";
-        }
-
-        var10000.append(var10001).append("]");
+        (new StringBuilder("state [")).append(this.getSessionTimeString()).append(", ").append(playWhenReady).append(", ").append(getStateString(state)).append("]");
     }
 
     public final void onRepeatModeChanged(int repeatMode) {
-        StringBuilder var10000 = new StringBuilder("repeatMode [");
-        String var10001;
-        switch(repeatMode) {
-            case 0:
-                var10001 = "OFF";
-                break;
-            case 1:
-                var10001 = "ONE";
-                break;
-            case 2:
-                var10001 = "ALL";
-                break;
-            default:
-                var10001 = "?";
-        }
-
-        var10000.append(var10001).append("]");
+        (new StringBuilder("repeatMode [")).append(getRepeatModeString(repeatMode)).append("]");
     }
 
     public final void onPositionDiscontinuity(int reason) {
@@ -142,52 +109,31 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
     public final void onTracksChanged(TrackGroupArray ignored, TrackSelectionArray trackSelections) {
         MappedTrackInfo mappedTrackInfo;
         if ((mappedTrackInfo = this.trackSelector.getCurrentMappedTrackInfo()) != null) {
-            int groupIndex;
-            String adaptiveSupport;
+            int selectionIndex;
+            String formatSupport;
             for(int rendererIndex = 0; rendererIndex < mappedTrackInfo.length; ++rendererIndex) {
                 TrackGroupArray rendererTrackGroups = mappedTrackInfo.getTrackGroups(rendererIndex);
                 TrackSelection trackSelection = trackSelections.get(rendererIndex);
                 if (rendererTrackGroups.length > 0) {
                     (new StringBuilder("  Renderer:")).append(rendererIndex).append(" [");
 
-                    for(groupIndex = 0; groupIndex < rendererTrackGroups.length; ++groupIndex) {
+                    for(selectionIndex = 0; selectionIndex < rendererTrackGroups.length; ++selectionIndex) {
                         TrackGroup trackGroup;
-                        int var10000 = (trackGroup = rendererTrackGroups.get(groupIndex)).length;
-                        int var14 = mappedTrackInfo.getAdaptiveSupport(rendererIndex, groupIndex, false);
-                        String var21;
-                        if (var10000 < 2) {
-                            var21 = "N/A";
-                        } else {
-                            switch(var14) {
-                                case 0:
-                                    var21 = "NO";
-                                    break;
-                                case 8:
-                                    var21 = "YES_NOT_SEAMLESS";
-                                    break;
-                                case 16:
-                                    var21 = "YES";
-                                    break;
-                                default:
-                                    var21 = "?";
-                            }
-                        }
-
-                        adaptiveSupport = var21;
-                        (new StringBuilder("    Group:")).append(groupIndex).append(", adaptive_supported=").append(adaptiveSupport).append(" [");
+                        formatSupport = getAdaptiveSupportString((trackGroup = rendererTrackGroups.get(selectionIndex)).length, mappedTrackInfo.getAdaptiveSupport(rendererIndex, selectionIndex, false));
+                        (new StringBuilder("    Group:")).append(selectionIndex).append(", adaptive_supported=").append(formatSupport).append(" [");
 
                         for(int trackIndex = 0; trackIndex < trackGroup.length; ++trackIndex) {
-                            String status = getTrackStatusString(trackSelection != null && trackSelection.getTrackGroup() == trackGroup && trackSelection.indexOf(trackIndex) != -1);
-                            String formatSupport = getFormatSupportString(mappedTrackInfo.getTrackFormatSupport(rendererIndex, groupIndex, trackIndex));
-                            (new StringBuilder("      ")).append(status).append(" Track:").append(trackIndex).append(", ").append(Format.toLogString(trackGroup.getFormat(trackIndex))).append(", supported=").append(formatSupport);
+                            String status = getTrackStatusString(trackSelection, trackGroup, trackIndex);
+                            String supported = getFormatSupportString(mappedTrackInfo.getTrackFormatSupport(rendererIndex, selectionIndex, trackIndex));
+                            (new StringBuilder("      ")).append(status).append(" Track:").append(trackIndex).append(", ").append(Format.toLogString(trackGroup.getFormat(trackIndex))).append(", supported=").append(supported);
                         }
                     }
 
                     if (trackSelection != null) {
-                        for(groupIndex = 0; groupIndex < trackSelection.length(); ++groupIndex) {
+                        for(selectionIndex = 0; selectionIndex < trackSelection.length(); ++selectionIndex) {
                             Metadata metadata;
-                            if ((metadata = trackSelection.getFormat(groupIndex).metadata) != null) {
-                                printMetadata(metadata, "      ");
+                            if ((metadata = trackSelection.getFormat(selectionIndex).metadata) != null) {
+                                this.printMetadata(metadata, "      ");
                                 break;
                             }
                         }
@@ -197,14 +143,14 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
 
             TrackGroupArray unassociatedTrackGroups;
             if ((unassociatedTrackGroups = mappedTrackInfo.getUnassociatedTrackGroups()).length > 0) {
-                for(groupIndex = 0; groupIndex < unassociatedTrackGroups.length; ++groupIndex) {
+                for(int groupIndex = 0; groupIndex < unassociatedTrackGroups.length; ++groupIndex) {
                     (new StringBuilder("    Group:")).append(groupIndex).append(" [");
                     TrackGroup trackGroup = unassociatedTrackGroups.get(groupIndex);
 
-                    for(int groupIndex2 = 0; groupIndex2 < trackGroup.length; ++groupIndex2) {
+                    for(selectionIndex = 0; selectionIndex < trackGroup.length; ++selectionIndex) {
                         String status = getTrackStatusString(false);
-                        adaptiveSupport = getFormatSupportString(0);
-                        (new StringBuilder("      ")).append(status).append(" Track:").append(groupIndex2).append(", ").append(Format.toLogString(trackGroup.getFormat(groupIndex2))).append(", supported=").append(adaptiveSupport);
+                        formatSupport = getFormatSupportString(0);
+                        (new StringBuilder("      ")).append(status).append(" Track:").append(selectionIndex).append(", ").append(Format.toLogString(trackGroup.getFormat(selectionIndex))).append(", supported=").append(formatSupport);
                     }
                 }
             }
@@ -213,7 +159,7 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
     }
 
     public final void onMetadata(Metadata metadata) {
-        printMetadata(metadata, "  ");
+        this.printMetadata(metadata, "  ");
     }
 
     public final void onAudioEnabled(DecoderCounters counters) {
@@ -320,7 +266,7 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
         Log.e("AVProVideo: EventLogger", "internalError [" + this.getSessionTimeString() + ", " + type + "]", e);
     }
 
-    private static void printMetadata(Metadata metadata, String prefix) {
+    private void printMetadata(Metadata metadata, String prefix) {
         for(int i = 0; i < metadata.length(); ++i) {
             Entry entry;
             if ((entry = metadata.get(i)) instanceof TextInformationFrame) {
@@ -360,6 +306,21 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
         return timeMs == -9223372036854775807L ? "?" : TIME_FORMAT.format((double)((float)timeMs / 1000.0F));
     }
 
+    private static String getStateString(int state) {
+        switch(state) {
+            case 1:
+                return "I";
+            case 2:
+                return "B";
+            case 3:
+                return "R";
+            case 4:
+                return "E";
+            default:
+                return "?";
+        }
+    }
+
     private static String getFormatSupportString(int formatSupport) {
         switch(formatSupport) {
             case 0:
@@ -376,8 +337,42 @@ final class EventLogger implements EventListener, AudioRendererEventListener, co
         }
     }
 
+    private static String getAdaptiveSupportString(int trackCount, int adaptiveSupport) {
+        if (trackCount < 2) {
+            return "N/A";
+        } else {
+            switch(adaptiveSupport) {
+                case 0:
+                    return "NO";
+                case 8:
+                    return "YES_NOT_SEAMLESS";
+                case 16:
+                    return "YES";
+                default:
+                    return "?";
+            }
+        }
+    }
+
+    private static String getTrackStatusString(TrackSelection selection, TrackGroup group, int trackIndex) {
+        return getTrackStatusString(selection != null && selection.getTrackGroup() == group && selection.indexOf(trackIndex) != -1);
+    }
+
     private static String getTrackStatusString(boolean enabled) {
         return enabled ? "[X]" : "[ ]";
+    }
+
+    private static String getRepeatModeString(int repeatMode) {
+        switch(repeatMode) {
+            case 0:
+                return "OFF";
+            case 1:
+                return "ONE";
+            case 2:
+                return "ALL";
+            default:
+                return "?";
+        }
     }
 
     static {

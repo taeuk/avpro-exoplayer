@@ -8,16 +8,14 @@ package com.RenderHeads.AVProVideo;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DataSource.Factory;
 
-public class JarDataSourceFactory implements Factory {
-    private String m_Path;
+public class AVPro_FileDataSourceFactory implements Factory {
     private long m_FileOffset;
 
-    public JarDataSourceFactory(String path, long fileOffset) {
-        this.m_Path = path;
+    public AVPro_FileDataSourceFactory(long fileOffset) {
         this.m_FileOffset = fileOffset;
     }
 
     public DataSource createDataSource() {
-        return new JarDataSource(this.m_Path, this.m_FileOffset);
+        return new AVPro_FileDataSource(this.m_FileOffset);
     }
 }

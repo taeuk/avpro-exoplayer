@@ -5,6 +5,7 @@
 
 package com.RenderHeads.AVProVideo;
 
+import android.annotation.TargetApi;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
 import android.opengl.GLES30;
@@ -14,6 +15,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
+@TargetApi(18)
 public class AVProMobileVideo_GlRender {
     private int m_FrameBufferHandle;
     private int m_FrameBufferTextureHandle;
@@ -355,8 +357,9 @@ public class AVProMobileVideo_GlRender {
         this.m_TextureHandle = intBuffer.get(0);
         if (this.m_TextureHandle > 0) {
             (new StringBuilder("CreateGlTexture m_TextureHandle: ")).append(this.m_TextureHandle);
-            int textureFormat;
-            GLES20.glBindTexture(textureFormat = this.m_bTextureFormat_EOS ? '赥' : 3553, this.m_TextureHandle);
+            int var10000 = this.m_bTextureFormat_EOS ? '赥' : 3553;
+            int textureFormat = var10000;
+            GLES20.glBindTexture(var10000, this.m_TextureHandle);
             if (this.m_HasImageData) {
                 GLES20.glTexImage2D(textureFormat, 0, 6408, this.m_Width, this.m_Height, 0, 6408, 5121, this.m_ImageData);
             }

@@ -70,12 +70,13 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     protected static final int Format_Dash = 2;
     protected static final int Format_SS = 3;
     protected int m_VideoState;
-    protected boolean m_bVideo_CreateRenderSurface;
-    protected boolean m_bVideo_DestroyRenderSurface;
-    protected boolean m_bVideo_RenderSurfaceCreated;
-    protected boolean m_bVideo_AcceptCommands;
+    protected AtomicBoolean m_bVideo_CreateRenderSurface;
+    protected AtomicBoolean m_bVideo_DestroyRenderSurface;
+    protected AtomicBoolean m_bVideo_RenderSurfaceCreated;
+    protected AtomicBoolean m_bVideo_AcceptCommands;
     protected int m_iCurrentAudioTrackIndex;
     protected boolean m_bSourceHasVideo;
+    protected boolean m_bSourceHasAudio;
     protected int m_iNumberAudioTracks;
     protected boolean m_bSourceHasTimedText;
     protected boolean m_bSourceHasSubtitles;
@@ -189,12 +190,17 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_TextureTimeStamp = -9223372036854775808L;
         this.m_CommandQueue = new LinkedList();
         this.m_VideoState = 0;
-        this.m_bVideo_CreateRenderSurface = false;
-        this.m_bVideo_DestroyRenderSurface = false;
-        this.m_bVideo_RenderSurfaceCreated = false;
-        this.m_bVideo_AcceptCommands = false;
+        this.m_bVideo_CreateRenderSurface = new AtomicBoolean();
+        this.m_bVideo_CreateRenderSurface.set(false);
+        this.m_bVideo_DestroyRenderSurface = new AtomicBoolean();
+        this.m_bVideo_DestroyRenderSurface.set(false);
+        this.m_bVideo_RenderSurfaceCreated = new AtomicBoolean();
+        this.m_bVideo_RenderSurfaceCreated.set(false);
+        this.m_bVideo_AcceptCommands = new AtomicBoolean();
+        this.m_bVideo_AcceptCommands.set(false);
         this.m_iCurrentAudioTrackIndex = -1;
         this.m_bSourceHasVideo = false;
+        this.m_bSourceHasAudio = false;
         this.m_iNumberAudioTracks = 0;
         this.m_bSourceHasTimedText = false;
         this.m_bSourceHasSubtitles = false;
@@ -303,13 +309,14 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.CloseVideoOnPlayer();
         this.m_VideoState = 0;
         this.m_CommandQueue = new LinkedList();
-        this.m_bVideo_AcceptCommands = false;
+        this.m_bVideo_AcceptCommands.set(false);
         this.m_Width = 0;
         this.m_Height = 0;
         this.m_DurationMs = 0L;
         this.m_fPlaybackRate = 1.0F;
         this.m_iCurrentAudioTrackIndex = -1;
         this.m_bSourceHasVideo = false;
+        this.m_bSourceHasAudio = false;
         this.m_iNumberAudioTracks = 0;
         this.m_bSourceHasTimedText = false;
         this.m_bSourceHasSubtitles = false;
@@ -317,11 +324,11 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_TextureTimeStamp = -9223372036854775808L;
         this.m_FrameCount = 0;
         this.m_fBufferingProgressPercent = 0.0F;
-        if (this.m_bVideo_RenderSurfaceCreated) {
-            this.m_bVideo_DestroyRenderSurface = true;
+        if (this.m_bVideo_RenderSurfaceCreated.get()) {
+            this.m_bVideo_DestroyRenderSurface.set(true);
         }
 
-        this.m_bVideo_CreateRenderSurface = false;
+        this.m_bVideo_CreateRenderSurface.set(false);
         this.m_iLastError = 0;
     }
 
@@ -391,22 +398,29 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     }
 
     public int GetTextureHandle() {
-        return this.m_GlRender_Video != null && this.m_bVideo_RenderSurfaceCreated && !this.m_bVideo_DestroyRenderSurface ? this.m_GlRender_Video.GetGlTextureHandle(false) : 0;
+        if (this.m_VideoState < 3) {
+            return 0;
+        } else {
+            return this.m_GlRender_Video != null ? this.m_GlRender_Video.GetGlTextureHandle(false) : 0;
+        }
     }
 
     public float[] GetTextureTransform() {
-        if (this.m_GlRender_Video != null && this.m_SurfaceTexture != null && this.m_bVideo_RenderSurfaceCreated && !this.m_bVideo_DestroyRenderSurface) {
-            float[] matrix = new float[16];
-            this.m_SurfaceTexture.getTransformMatrix(matrix);
-            System.out.println("Matrix " + matrix[0] + "," + matrix[1] + "," + matrix[2] + "," + matrix[3] + " " + matrix[4] + "," + matrix[5] + "," + matrix[6] + "," + matrix[7] + " " + matrix[8] + "," + matrix[9] + "," + matrix[10] + "," + matrix[11] + " " + matrix[12] + "," + matrix[13] + "," + matrix[14] + "," + matrix[15]);
-            float[] result;
-            (result = new float[6])[4] = Math.signum(matrix[0]);
-            result[2] = -Math.signum(matrix[1]);
-            result[1] = Math.signum(matrix[4]);
-            result[0] = -Math.signum(matrix[5]);
-            result[4] = 0.0F;
-            result[5] = 0.0F;
-            return null;
+        float[] result = null;
+        if (this.m_GlRender_Video != null && this.m_SurfaceTexture != null && this.m_bVideo_RenderSurfaceCreated.get() && !this.m_bVideo_DestroyRenderSurface.get()) {
+            if (this.m_bUseFastOesPath) {
+                float[] matrix = new float[16];
+                this.m_SurfaceTexture.getTransformMatrix(matrix);
+                System.out.println("Matrix " + matrix[0] + "," + matrix[1] + "," + matrix[2] + "," + matrix[3] + " " + matrix[4] + "," + matrix[5] + "," + matrix[6] + "," + matrix[7] + " " + matrix[8] + "," + matrix[9] + "," + matrix[10] + "," + matrix[11] + " " + matrix[12] + "," + matrix[13] + "," + matrix[14] + "," + matrix[15]);
+                (result = new float[6])[0] = Math.signum(matrix[0]);
+                result[1] = Math.signum(matrix[1]);
+                result[2] = -Math.signum(matrix[4]);
+                result[3] = -Math.signum(matrix[5]);
+                result[4] = 0.0F;
+                result[5] = 0.0F;
+            }
+
+            return result;
         } else {
             return null;
         }
@@ -429,10 +443,11 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     public boolean OpenVideoFromFile(String filePath, long fileOffset, String httpHeaderJson, int forcedFileFormat) {
         this.CloseVideo();
         this.m_VideoState = 1;
-        this.m_bVideo_CreateRenderSurface = false;
-        this.m_bVideo_DestroyRenderSurface = false;
+        this.m_bVideo_CreateRenderSurface.set(false);
+        this.m_bVideo_DestroyRenderSurface.set(false);
         this.m_iCurrentAudioTrackIndex = -1;
         this.m_bSourceHasVideo = false;
+        this.m_bSourceHasAudio = false;
         this.m_iNumberAudioTracks = 0;
         this.m_bSourceHasTimedText = false;
         this.m_bSourceHasSubtitles = false;
@@ -443,6 +458,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
         this.m_bIsBuffering = false;
         this.m_bIsSeeking = false;
         this.m_fBufferingProgressPercent = 0.0F;
+        (new StringBuilder("OpenVideoFromFile: m_iNumberFramesAvailable = ")).append(this.m_iNumberFramesAvailable.get());
         return this.OpenVideoFromFileInternal(filePath, fileOffset, httpHeaderJson, forcedFileFormat);
     }
 
@@ -479,7 +495,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     }
 
     public boolean HasAudio() {
-        return this.m_iNumberAudioTracks > 0;
+        return this.m_bSourceHasAudio;
     }
 
     public boolean HasTimedText() {
@@ -618,7 +634,7 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
     }
 
     private void UpdateCommandQueue() {
-        if (this.m_bVideo_AcceptCommands && this.m_CommandQueue != null) {
+        if (this.m_bVideo_AcceptCommands.get() && this.m_CommandQueue != null) {
             while(!this.m_CommandQueue.isEmpty()) {
                 AVProVideoPlayer.VideoCommand videoCommand;
                 if ((videoCommand = (AVProVideoPlayer.VideoCommand)this.m_CommandQueue.poll())._command == VideoCommand_Play) {
@@ -652,16 +668,18 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
             return false;
         } else {
             if (!this.m_bWatermarked || s_bCompressedWatermarkDataGood && this.m_bWatermarkDataGood) {
-                if (this.m_bVideo_DestroyRenderSurface) {
+                boolean bDestroy = this.m_bVideo_DestroyRenderSurface.get();
+                boolean bCreate = this.m_bVideo_CreateRenderSurface.get();
+                if (bDestroy) {
                     if (this.m_GlRender_Video != null) {
                         this.m_GlRender_Video.DestroyRenderTarget();
                     }
 
-                    this.m_bVideo_DestroyRenderSurface = false;
-                    this.m_bVideo_RenderSurfaceCreated = false;
+                    this.m_bVideo_DestroyRenderSurface.set(false);
+                    this.m_bVideo_RenderSurfaceCreated.set(false);
                 }
 
-                if (this.m_bVideo_CreateRenderSurface) {
+                if (bCreate) {
                     if (this.m_GlRender_Video != null) {
                         this.m_GlRender_Video.DestroyRenderTarget();
                         if (!this.m_bUseFastOesPath) {
@@ -669,11 +687,11 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
                         }
                     }
 
-                    this.m_bVideo_DestroyRenderSurface = false;
-                    this.m_bVideo_CreateRenderSurface = false;
-                    this.m_bVideo_RenderSurfaceCreated = true;
+                    this.m_bVideo_DestroyRenderSurface.set(false);
+                    this.m_bVideo_CreateRenderSurface.set(false);
+                    this.m_bVideo_RenderSurfaceCreated.set(true);
                     if (!this.m_bIsStream && this.m_VideoState >= 3) {
-                        this.m_bVideo_AcceptCommands = true;
+                        this.m_bVideo_AcceptCommands.set(true);
                         if (this.m_VideoState != 5 && this.m_VideoState != 4) {
                             this.m_VideoState = 6;
                         }
@@ -681,8 +699,8 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
                 }
 
                 synchronized(this) {
-                    int numFramesAvailable;
-                    if ((numFramesAvailable = this.m_iNumberFramesAvailable.getAndSet(0)) > 0 && this.m_bVideo_RenderSurfaceCreated && this.m_GlRender_Video != null) {
+                    int numFramesAvailable = this.m_iNumberFramesAvailable.get();
+                    if (this.m_GlRender_Video != null && this.m_bVideo_RenderSurfaceCreated.get() && numFramesAvailable > 0 && (this.m_Width > 0 && this.m_bSourceHasVideo || this.m_bSourceHasAudio)) {
                         if (this.m_bUseFastOesPath) {
                             this.m_SurfaceTexture.updateTexImage();
                             this.m_TextureTimeStamp = this.m_SurfaceTexture.getTimestamp();
@@ -713,11 +731,9 @@ public abstract class AVProVideoPlayer implements OnFrameAvailableListener {
                             this.m_GlRender_Video.EndRender();
                         }
 
-                        if (this.m_Width > 0) {
-                            this.m_FrameCount += numFramesAvailable;
-                            this.UpdateDisplayFrameRate(numFramesAvailable);
-                        }
-
+                        this.m_FrameCount += numFramesAvailable;
+                        this.UpdateDisplayFrameRate(numFramesAvailable);
+                        this.m_iNumberFramesAvailable.set(0);
                         result = true;
                     }
                 }

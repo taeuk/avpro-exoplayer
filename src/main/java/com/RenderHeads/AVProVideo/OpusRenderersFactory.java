@@ -17,7 +17,7 @@ import com.google.android.exoplayer2.text.TextOutput;
 import com.google.android.exoplayer2.video.VideoRendererEventListener;
 import com.twobigears.audio360exo2.OpusRenderer;
 
-public final class OpusRenderersFactory implements RenderersFactory {
+public class OpusRenderersFactory implements RenderersFactory {
     private AudioSink m_Sink;
     private RenderersFactory m_RenderersFactory;
 
@@ -26,7 +26,7 @@ public final class OpusRenderersFactory implements RenderersFactory {
         this.m_RenderersFactory = renderersFactory;
     }
 
-    public final Renderer[] createRenderers(Handler eventHandler, VideoRendererEventListener videoRendererEventListener, AudioRendererEventListener audioRendererEventListener, TextOutput textRendererOutput, MetadataOutput metadataRendererOutput, DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
+    public Renderer[] createRenderers(Handler eventHandler, VideoRendererEventListener videoRendererEventListener, AudioRendererEventListener audioRendererEventListener, TextOutput textRendererOutput, MetadataOutput metadataRendererOutput, DrmSessionManager<FrameworkMediaCrypto> drmSessionManager) {
         Renderer[] renderers = this.m_RenderersFactory.createRenderers(eventHandler, videoRendererEventListener, audioRendererEventListener, textRendererOutput, metadataRendererOutput, drmSessionManager);
 
         for(int i = 0; i < renderers.length; ++i) {

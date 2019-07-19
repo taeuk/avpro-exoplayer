@@ -11,14 +11,14 @@ import com.google.android.exoplayer2.mediacodec.MediaCodecUtil;
 import com.google.android.exoplayer2.mediacodec.MediaCodecUtil.DecoderQueryException;
 import java.util.List;
 
-public final class CustomMediaCodecSelector implements MediaCodecSelector {
+public class CustomMediaCodecSelector implements MediaCodecSelector {
     private boolean m_PreferSoftware;
 
     public CustomMediaCodecSelector(boolean preferSoftware) {
         this.m_PreferSoftware = preferSoftware;
     }
 
-    public final MediaCodecInfo getDecoderInfo(String mimeType, boolean requiresSecureDecoder) throws DecoderQueryException {
+    public MediaCodecInfo getDecoderInfo(String mimeType, boolean requiresSecureDecoder) throws DecoderQueryException {
         if (mimeType.contains("video") && this.m_PreferSoftware) {
             List<MediaCodecInfo> videoCodecs = MediaCodecUtil.getDecoderInfos(mimeType, requiresSecureDecoder);
             MediaCodecInfo ret = null;
@@ -35,7 +35,7 @@ public final class CustomMediaCodecSelector implements MediaCodecSelector {
         }
     }
 
-    public final MediaCodecInfo getPassthroughDecoderInfo() throws DecoderQueryException {
+    public MediaCodecInfo getPassthroughDecoderInfo() throws DecoderQueryException {
         return MediaCodecSelector.DEFAULT.getPassthroughDecoderInfo();
     }
 }

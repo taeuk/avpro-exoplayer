@@ -9,9 +9,12 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.AssetFileDescriptor;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Build.VERSION;
+import android.text.TextUtils;
+import android.util.Log;
 import android.view.Surface;
 import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.ExoPlayerFactory;
@@ -22,33 +25,30 @@ import com.google.android.exoplayer2.SeekParameters;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.Player.EventListener;
-import com.google.android.exoplayer2.SimpleExoPlayer.VideoListener;
 import com.google.android.exoplayer2.Timeline.Period;
 import com.google.android.exoplayer2.Timeline.Window;
 import com.google.android.exoplayer2.audio.AudioSink;
+import com.google.android.exoplayer2.drm.DrmSessionManager;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
-import com.google.android.exoplayer2.source.AdaptiveMediaSourceEventListener;
-import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
+import com.google.android.exoplayer2.source.MediaSourceEventListener;
 import com.google.android.exoplayer2.source.TrackGroup;
 import com.google.android.exoplayer2.source.TrackGroupArray;
 import com.google.android.exoplayer2.source.MediaSource.MediaPeriodId;
-import com.google.android.exoplayer2.source.dash.DashMediaSource;
-import com.google.android.exoplayer2.source.hls.HlsMediaSource;
-import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.LoadEventInfo;
+import com.google.android.exoplayer2.source.MediaSourceEventListener.MediaLoadData;
 import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
-import com.google.android.exoplayer2.trackselection.TrackSelection;
 import com.google.android.exoplayer2.trackselection.TrackSelectionArray;
 import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection.Factory;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector.ParametersBuilder;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector.SelectionOverride;
 import com.google.android.exoplayer2.trackselection.MappingTrackSelector.MappedTrackInfo;
-import com.google.android.exoplayer2.upstream.BandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
 import com.google.android.exoplayer2.util.Util;
+import com.google.android.exoplayer2.video.VideoListener;
 import com.twobigears.audio360.AudioEngine;
 import com.twobigears.audio360.ChannelMap;
 import com.twobigears.audio360.EngineInitSettings;
@@ -58,15 +58,21 @@ import com.twobigears.audio360.TBVector;
 import com.twobigears.audio360exo2.Audio360Sink;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
+import org.json.JSONObject;
 
-public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListener, VideoListener, AdaptiveMediaSourceEventListener, ExtractorMediaSource.EventListener, BandwidthMeter.EventListener {
+public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListener, MediaSourceEventListener, VideoListener {
     private static final String PREFERENCE_NAME = "com.off2.amaze.AVProVideo";
     private static final String SAVED_MAX_INITIAL_BITRATE_KEY = "max_init_bitrate";
 
     private Factory m_AdaptiveTrackSelectionFactory;
     private Handler m_MainHandler;
     private SimpleExoPlayer m_ExoPlayer;
+    private MediaSource m_MediaSource;
     private DefaultTrackSelector m_TrackSelector;
     private EventLogger m_EventLogger;
     private String m_UserAgent;
@@ -74,14 +80,18 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     private String m_PendingFilePath;
     private long m_PendingFileOffset;
     private Surface m_Surface;
+    private Surface m_Surface_ToBeReleased;
+    private AtomicBoolean m_bUpdateSurface = new AtomicBoolean();
+    private AtomicBoolean m_bSurfaceTextureBound;
     float[] m_textureTransform;
     private SpatDecoderQueue m_Spat;
     private AudioEngine m_AudioEngine;
+    private static ChannelMap[] m_ChannelMap;
     private AudioSink m_Sink;
     private DefaultBandwidthMeter m_BandwidthMeter;
     private long m_LastAbsoluteTime;
-    private static ChannelMap[] m_ChannelMap;
     private int m_ForcedFileFormat;
+    private boolean m_bDebugLogStateChange = false;
 
     private void initChannelMap() {
         (m_ChannelMap = new ChannelMap[27])[0] = ChannelMap.TBE_8_2;
@@ -115,6 +125,9 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
 
     public AVProVideoExoPlayer(int playerIndex, boolean watermarked, Random random) {
         super(playerIndex, watermarked, random);
+        this.m_bUpdateSurface.set(false);
+        this.m_bSurfaceTextureBound = new AtomicBoolean();
+        this.m_bSurfaceTextureBound.set(false);
         if (m_ChannelMap == null) {
             this.initChannelMap();
         }
@@ -180,11 +193,6 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     public void onVideoSizeChanged(int width, int height, int unappliedRotationDegrees, float pixelWidthHeightRatio) {
         if (this.m_Width != width || this.m_Height != height) {
             System.out.println("AVProVideo changing video size " + this.m_Width + "x" + this.m_Height + " to " + width + "x" + height);
-            this.m_Width = width;
-            this.m_Height = height;
-            this.m_bSourceHasVideo = true;
-            this.m_bVideo_CreateRenderSurface = true;
-            this.m_bVideo_DestroyRenderSurface = false;
 
             SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = sharedPref.edit();
@@ -194,18 +202,36 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
             switch(unappliedRotationDegrees) {
                 case 90:
                     this.m_textureTransform = new float[]{0.0F, 1.0F, -1.0F, 0.0F, 0.0F, 0.0F};
-                    return;
+                    if (this.m_bDebugLogStateChange) {
+                        Log.e("AVProVideo", "Texture transform set for 90 degrees");
+                    }
+                    break;
                 case 180:
                     this.m_textureTransform = new float[]{-1.0F, 0.0F, 0.0F, -1.0F, 0.0F, 0.0F};
-                    return;
+                    if (this.m_bDebugLogStateChange) {
+                        Log.e("AVProVideo", "Texture transform set for 180 degrees");
+                    }
+                    break;
                 case 270:
                     this.m_textureTransform = new float[]{0.0F, -1.0F, 1.0F, 0.0F, 0.0F, 0.0F};
+                    if (this.m_bDebugLogStateChange) {
+                        Log.e("AVProVideo", "Texture transform set for 270 degrees");
+                    }
                     break;
                 default:
-                    return;
+                    if (this.m_bDebugLogStateChange) {
+                        Log.e("AVProVideo", "NO texture transform set");
+                    }
+            }
+
+            synchronized(this) {
+                this.m_Width = width;
+                this.m_Height = height;
+                this.m_bSourceHasVideo = true;
+                this.m_bVideo_CreateRenderSurface.set(true);
+                this.m_bVideo_DestroyRenderSurface.set(true);
             }
         }
-
     }
 
     public void onRenderedFirstFrame() {
@@ -241,7 +267,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
         return this.CalculateSeekableTimeRangeForPeriod();
     }
 
-    protected boolean InitialisePlayer(final boolean enableAudio360, final int audio360Channels, final boolean preferSoftwareDecoder) {
+    protected boolean InitialisePlayer(boolean enableAudio360, int audio360Channels, boolean preferSoftwareDecoder) {
         if (this.m_Context == null) {
             return false;
         } else {
@@ -249,72 +275,68 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
             try {
                 String packageName = this.m_Context.getPackageName();
                 version = this.m_Context.getPackageManager().getPackageInfo(packageName, 0).versionName;
-            } catch (NameNotFoundException var7) {
+            } catch (NameNotFoundException var13) {
                 version = "?";
             }
 
             this.m_UserAgent = "AVProMobileVideo/" + version + " (Linux;Android " + VERSION.RELEASE + ") ExoPlayerLib/2.8.4";
-            final Activity activity = (Activity)((Activity)this.m_Context);
-            activity.runOnUiThread(new Runnable() {
-                public final void run() {
-                    SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
-                    long maxInitBitrate = sharedPref.getLong(SAVED_MAX_INITIAL_BITRATE_KEY, 64000L);
-                    System.out.println("AVProVideo: InitializePlayer with init bitrate " + maxInitBitrate);
+            Activity activity = (Activity)((Activity)this.m_Context);
+            this.m_BandwidthMeter = new DefaultBandwidthMeter();
+            this.m_MainHandler = new Handler(activity.getMainLooper());
+            this.m_MediaDataSourceFactory = this.BuildDataSourceFactory(true, (String)null);
+            this.m_AdaptiveTrackSelectionFactory = new Factory(this.m_BandwidthMeter);
+            this.m_TrackSelector = new DefaultTrackSelector(this.m_AdaptiveTrackSelectionFactory);
+            this.m_EventLogger = new EventLogger(this.m_TrackSelector);
 
-                    AVProVideoExoPlayer.this.m_BandwidthMeter = new DefaultBandwidthMeter.Builder()
-                            .setInitialBitrateEstimate(maxInitBitrate)
-                            .setEventListener(new Handler(), AVProVideoExoPlayer.this)
-                            .build();
+            SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
+            long maxInitBitrate = sharedPref.getLong(SAVED_MAX_INITIAL_BITRATE_KEY, 64000L);
+            System.out.println("AVProVideo: InitializePlayer with init bitrate " + maxInitBitrate);
 
-                    AVProVideoExoPlayer.this.m_MainHandler = new Handler(activity.getMainLooper());
-                    AVProVideoExoPlayer.this.m_MediaDataSourceFactory = AVProVideoExoPlayer.this.BuildDataSourceFactory(true);
-                    AVProVideoExoPlayer.this.m_AdaptiveTrackSelectionFactory = new AdaptiveTrackSelection.Factory(
-                            AVProVideoExoPlayer.this.m_BandwidthMeter,
-                            2000,
-                            AdaptiveTrackSelection.DEFAULT_MAX_DURATION_FOR_QUALITY_DECREASE_MS,
-                            AdaptiveTrackSelection.DEFAULT_MIN_DURATION_TO_RETAIN_AFTER_DISCARD_MS,
-                            AdaptiveTrackSelection.DEFAULT_BANDWIDTH_FRACTION);
+            this.m_BandwidthMeter = new DefaultBandwidthMeter.Builder()
+                    .setInitialBitrateEstimate(maxInitBitrate)
+                    .build();
 
-                    AVProVideoExoPlayer.this.m_TrackSelector = new DefaultTrackSelector(AVProVideoExoPlayer.this.m_AdaptiveTrackSelectionFactory);
-                    AVProVideoExoPlayer.this.m_TrackSelector.setParameters(
-                        AVProVideoExoPlayer.this.m_TrackSelector
-                                .buildUponParameters()
-                                .setMaxVideoSize(4096, 4096)
-                                .setMaxVideoBitrate(1024*1024*1024)
-                                .setExceedRendererCapabilitiesIfNecessary(false));
+            this.m_MainHandler = new Handler(activity.getMainLooper());
+            this.m_MediaDataSourceFactory = this.BuildDataSourceFactory(true, "");
+            this.m_AdaptiveTrackSelectionFactory = new AdaptiveTrackSelection.Factory(
+                    this.m_BandwidthMeter,
+                    2000,
+                    AdaptiveTrackSelection.DEFAULT_MAX_DURATION_FOR_QUALITY_DECREASE_MS,
+                    AdaptiveTrackSelection.DEFAULT_MIN_DURATION_TO_RETAIN_AFTER_DISCARD_MS,
+                    AdaptiveTrackSelection.DEFAULT_BANDWIDTH_FRACTION);
 
-                    AVProVideoExoPlayer.this.m_EventLogger = new EventLogger(AVProVideoExoPlayer.this.m_TrackSelector);
-                    CustomDefaultRenderersFactory defaultRenderersFactory;
-                    RenderersFactory rFactory = defaultRenderersFactory = new CustomDefaultRenderersFactory(AVProVideoExoPlayer.this.m_Context, preferSoftwareDecoder);
-                    if (enableAudio360) {
-                        EngineInitSettings engineSettings;
-                        (engineSettings = new EngineInitSettings()).getAudioSettings().setBufferSize(1024);
-                        engineSettings.getAudioSettings().setSampleRate(48000.0F);
-                        engineSettings.getMemorySettings().setSpatQueueSizePerChannel(8192);
-                        AVProVideoExoPlayer.this.m_AudioEngine = AudioEngine.create(engineSettings, AVProVideoExoPlayer.this.m_Context);
-                        AVProVideoExoPlayer.this.m_Spat = AVProVideoExoPlayer.this.m_AudioEngine.createSpatDecoderQueue();
-                        double latency = AVProVideoExoPlayer.this.m_AudioEngine.getOutputLatencyMs();
-                        ChannelMap channelMap = AVProVideoExoPlayer.this.getChannelMap(audio360Channels);
-                        AVProVideoExoPlayer.this.m_Sink = new Audio360Sink(AVProVideoExoPlayer.this.m_Spat, channelMap, latency);
-                        rFactory = new OpusRenderersFactory(AVProVideoExoPlayer.this.m_Sink, defaultRenderersFactory);
-                    }
+           this.m_TrackSelector = new DefaultTrackSelector(AVProVideoExoPlayer.this.m_AdaptiveTrackSelectionFactory);
+           this.m_TrackSelector.setParameters(this.m_TrackSelector
+                                              .buildUponParameters()
+                                              .setMaxVideoSize(4096, 4096)
+                                              .setMaxVideoBitrate(1024*1024*1024)
+                                              .setExceedRendererCapabilitiesIfNecessary(false));
 
-                    AVProVideoExoPlayer.this.m_ExoPlayer = ExoPlayerFactory.newSimpleInstance((RenderersFactory)rFactory, AVProVideoExoPlayer.this.m_TrackSelector);
-                    AVProVideoExoPlayer.this.m_ExoPlayer.addListener(AVProVideoExoPlayer.this);
-                    AVProVideoExoPlayer.this.m_ExoPlayer.addVideoListener(AVProVideoExoPlayer.this);
-                    AVProVideoExoPlayer.this.m_ExoPlayer.addAnalyticsListener(new com.google.android.exoplayer2.util.EventLogger(AVProVideoExoPlayer.this.m_TrackSelector));
-                }
-            });
+            CustomDefaultRenderersFactory defaultRenderersFactory;
+            RenderersFactory rFactory = defaultRenderersFactory = new CustomDefaultRenderersFactory(this.m_Context, (DrmSessionManager)null, 1, preferSoftwareDecoder);
+            if (enableAudio360) {
+                EngineInitSettings engineSettings;
+                (engineSettings = new EngineInitSettings()).getAudioSettings().setBufferSize(1024);
+                engineSettings.getAudioSettings().setSampleRate(48000.0F);
+                engineSettings.getMemorySettings().setSpatQueueSizePerChannel(8192);
+                this.m_AudioEngine = AudioEngine.create(engineSettings, this.m_Context);
+                this.m_Spat = this.m_AudioEngine.createSpatDecoderQueue();
+                double latency = this.m_AudioEngine.getOutputLatencyMs();
+                ChannelMap channelMap = this.getChannelMap(audio360Channels);
+                this.m_Sink = new Audio360Sink(this.m_Spat, channelMap, latency);
+                rFactory = new OpusRenderersFactory(this.m_Sink, defaultRenderersFactory);
+            }
+
+            this.m_ExoPlayer = ExoPlayerFactory.newSimpleInstance((RenderersFactory)rFactory, this.m_TrackSelector);
+            this.m_ExoPlayer.addListener(this);
+            this.m_ExoPlayer.addVideoListener(this);
             return true;
         }
     }
 
     protected void CloseVideoOnPlayer() {
         this.m_LastAbsoluteTime = 0L;
-        if (this.m_VideoState >= 3) {
-            this._stop();
-        }
-
+        this._stop();
         if (this.m_ExoPlayer != null) {
             this.m_ExoPlayer.clearVideoSurface();
         }
@@ -324,6 +346,9 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
             this.m_Surface = null;
         }
 
+        this.m_bUpdateSurface.set(false);
+        this.m_bSurfaceTextureBound.set(false);
+        this.m_MediaSource = null;
         this.m_VideoState = 0;
         this.m_PendingFilePath = null;
         this.m_PendingFileOffset = 0L;
@@ -331,6 +356,18 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
 
     protected void DeinitializeVideoPlayer() {
         this.m_TrackSelector = null;
+        this.m_MediaSource = null;
+        if (this.m_ExoPlayer != null) {
+            this.m_ExoPlayer.clearVideoSurface();
+        }
+
+        if (this.m_Surface != null) {
+            this.m_Surface.release();
+            this.m_Surface = null;
+        }
+
+        this.m_bUpdateSurface.set(false);
+        this.m_bSurfaceTextureBound.set(false);
         if (this.m_ExoPlayer != null) {
             this.m_ExoPlayer.stop();
             this.m_ExoPlayer.release();
@@ -370,12 +407,18 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
         return this.m_VideoState == 6 || this.m_VideoState == 7 || this.m_VideoState == 5 || this.m_VideoState == 8;
     }
 
-    private com.google.android.exoplayer2.upstream.HttpDataSource.Factory BuildHttpDataSourceFactory(boolean useBandwidthMeter) {
-        return new DefaultHttpDataSourceFactory(this.m_UserAgent, useBandwidthMeter ? this.m_BandwidthMeter : null, 8000, 8000, true);
+    private com.google.android.exoplayer2.upstream.HttpDataSource.Factory BuildHttpDataSourceFactory(boolean useBandwidthMeter, String httpHeaderJson) {
+        com.google.android.exoplayer2.upstream.HttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSourceFactory(this.m_UserAgent, useBandwidthMeter ? this.m_BandwidthMeter : null, 8000, 8000, true);
+        if (httpHeaderJson != null && !httpHeaderJson.isEmpty()) {
+            Map<String, String> httpHeaderMap = GetJsonAsMap(httpHeaderJson);
+            httpDataSourceFactory.getDefaultRequestProperties().set(httpHeaderMap);
+        }
+
+        return httpDataSourceFactory;
     }
 
-    private com.google.android.exoplayer2.upstream.DataSource.Factory BuildDataSourceFactory(boolean useBandwidthMeter) {
-        return new DefaultDataSourceFactory(this.m_Context, useBandwidthMeter ? this.m_BandwidthMeter : null, this.BuildHttpDataSourceFactory(useBandwidthMeter));
+    private com.google.android.exoplayer2.upstream.DataSource.Factory BuildDataSourceFactory(boolean useBandwidthMeter, String httpHeaderJson) {
+        return new DefaultDataSourceFactory(this.m_Context, useBandwidthMeter ? this.m_BandwidthMeter : null, this.BuildHttpDataSourceFactory(useBandwidthMeter, httpHeaderJson));
     }
 
     protected void PlayerRendererSetup() {
@@ -386,6 +429,40 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     }
 
     protected void PlayerRenderUpdate() {
+        this.UpdateVideoMetadata();
+        if (this.m_Surface_ToBeReleased != null) {
+            this.m_bSurfaceTextureBound.set(false);
+            if (this.m_ExoPlayer != null) {
+                this.m_ExoPlayer.clearVideoSurface();
+            }
+
+            this.m_Surface_ToBeReleased.release();
+            this.m_Surface_ToBeReleased = null;
+        }
+
+        if (this.m_bUpdateSurface.get()) {
+            if (this.m_ExoPlayer != null) {
+                this.m_ExoPlayer.clearVideoSurface();
+            }
+
+            if (this.m_Surface != null) {
+                this.m_Surface.release();
+                this.m_Surface = null;
+            }
+
+            if (this.m_SurfaceTexture != null) {
+                if (this.m_Surface == null) {
+                    this.m_Surface = new Surface(this.m_SurfaceTexture);
+                }
+
+                if (this.m_Surface != null && this.m_ExoPlayer != null) {
+                    this.m_ExoPlayer.setVideoSurface(this.m_Surface);
+                    this.m_bSurfaceTextureBound.set(true);
+                    this.m_bUpdateSurface.set(false);
+                }
+            }
+        }
+
         if (this.m_PendingFilePath != null && this.m_PendingFilePath.length() > 0) {
             this.OpenVideoFromFileInternal(this.m_PendingFilePath, this.m_PendingFileOffset, "", this.m_ForcedFileFormat);
         }
@@ -452,10 +529,30 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
         }
     }
 
-    private MediaSource BuildMediaSource(String filepath, long fileOffset) {
-        Uri uri = Uri.parse(filepath);
+    private static Map<String, String> GetJsonAsMap(String json) {
+        HashMap result = new HashMap();
+
+        try {
+            JSONObject jsonObj;
+            Iterator keyIt = (jsonObj = new JSONObject(json)).keys();
+
+            while(keyIt.hasNext()) {
+                String key = (String)keyIt.next();
+                String val = jsonObj.getString(key);
+                result.put(key, val);
+            }
+
+            return result;
+        } catch (Exception var6) {
+            throw new RuntimeException("Couldn't parse json:" + json, var6);
+        }
+    }
+
+    private MediaSource BuildMediaSource(String filePath, long fileOffset, String httpHeaderJson) {
+        MediaSource mediaSource = null;
+        Uri uri = Uri.parse(filePath);
         String lowerPath;
-        if (!(lowerPath = filepath.toLowerCase()).startsWith("jar:") && !lowerPath.contains(".zip!") && !lowerPath.contains(".obb!")) {
+        if (!(lowerPath = filePath.toLowerCase()).startsWith("jar:") && !lowerPath.contains(".zip!") && !lowerPath.contains(".obb!")) {
             int type = 3;
             switch(this.m_ForcedFileFormat) {
                 case 0:
@@ -471,36 +568,96 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
                     type = 1;
             }
 
-            System.out.println("AvPro BuildMediaSource: " + filepath);
-
+            com.google.android.exoplayer2.upstream.HttpDataSource.Factory httpFactory;
             switch(type) {
                 case 0:
-                    return new DashMediaSource(uri, this.BuildDataSourceFactory(false), new com.google.android.exoplayer2.source.dash.DefaultDashChunkSource.Factory(this.m_MediaDataSourceFactory), this.m_MainHandler, this);
+                    httpFactory = this.BuildHttpDataSourceFactory(false, httpHeaderJson);
+                    com.google.android.exoplayer2.source.dash.DashChunkSource.Factory chunkSourceFactory = new com.google.android.exoplayer2.source.dash.DefaultDashChunkSource.Factory(this.m_MediaDataSourceFactory);
+                    mediaSource = (new com.google.android.exoplayer2.source.dash.DashMediaSource.Factory(chunkSourceFactory, httpFactory)).createMediaSource(uri);
+                    break;
                 case 1:
-                    return new SsMediaSource(uri, this.BuildDataSourceFactory(false), new com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource.Factory(this.m_MediaDataSourceFactory), this.m_MainHandler, this.m_EventLogger);
+                    httpFactory = this.BuildHttpDataSourceFactory(false, httpHeaderJson);
+                    com.google.android.exoplayer2.source.smoothstreaming.SsChunkSource.Factory chunkSourceFactory1 = new com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource.Factory(this.m_MediaDataSourceFactory);
+                    mediaSource = (new com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource.Factory(chunkSourceFactory1, httpFactory)).createMediaSource(uri);
+                    break;
                 case 2:
-                    return new HlsMediaSource(uri, this.m_MediaDataSourceFactory, this.m_MainHandler, this);
+                    httpFactory = this.BuildHttpDataSourceFactory(false, httpHeaderJson);
+                    mediaSource = (new com.google.android.exoplayer2.source.hls.HlsMediaSource.Factory(httpFactory)).createMediaSource(uri);
+                    break;
                 case 3:
-                    return new ExtractorMediaSource(uri, this.BuildDataSourceFactory(false), new DefaultExtractorsFactory(), this.m_MainHandler, this.m_EventLogger);
+                    String scheme = uri.getScheme();
+                    if (fileOffset > 0L && (TextUtils.isEmpty(scheme) || "file".equals(scheme))) {
+                        if (filePath.startsWith("file:/")) {
+                            uri = Uri.parse(filePath.substring(6));
+                        }
+
+                        DefaultExtractorsFactory defaultExtractorsFactory;
+                        (defaultExtractorsFactory = new DefaultExtractorsFactory()).setMp4ExtractorFlags(1);
+                        mediaSource = (new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(new AVPro_FileDataSourceFactory(fileOffset))).setExtractorsFactory(defaultExtractorsFactory).createMediaSource(uri);
+                    } else {
+                        if (filePath.startsWith("file:/")) {
+                            uri = Uri.parse(filePath.substring(6));
+                        }
+
+                        com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = this.BuildDataSourceFactory(false, httpHeaderJson);
+                        DefaultExtractorsFactory defaultExtractorsFactory;
+                        (defaultExtractorsFactory = new DefaultExtractorsFactory()).setMp4ExtractorFlags(1);
+                        mediaSource = (new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(dataSourceFactory)).setExtractorsFactory(defaultExtractorsFactory).createMediaSource(uri);
+                    }
+                    break;
                 default:
                     throw new IllegalStateException("Unsupported type: " + type);
             }
         } else {
-            return new ExtractorMediaSource(uri, new JarDataSourceFactory(filepath, fileOffset), new DefaultExtractorsFactory(), this.m_MainHandler, this.m_EventLogger);
+            try {
+                String searchString = "/assets/";
+                int iIndexOf;
+                if ((iIndexOf = filePath.lastIndexOf(searchString)) != -1) {
+                    String strippedLowerFilepath = filePath.substring(iIndexOf + searchString.length());
+                    AssetFileDescriptor assetDesc;
+                    if ((assetDesc = this.m_Context.getAssets().openFd(strippedLowerFilepath)) != null) {
+                        assetDesc.close();
+                        Uri strippedUri = Uri.parse("assets:///" + strippedLowerFilepath);
+                        (new StringBuilder("uri = ")).append(strippedUri).append(" | fileOffset = ").append(fileOffset);
+                        DefaultExtractorsFactory defaultExtractorsFactory;
+                        (defaultExtractorsFactory = new DefaultExtractorsFactory()).setMp4ExtractorFlags(1);
+                        mediaSource = (new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(new AVPro_AssetSourceFactory(fileOffset, this.m_Context))).setExtractorsFactory(defaultExtractorsFactory).createMediaSource(strippedUri);
+                    }
+                }
+            } catch (Exception var14) {
+            }
+
+            if (mediaSource == null) {
+                DefaultExtractorsFactory defaultExtractorsFactory;
+                (defaultExtractorsFactory = new DefaultExtractorsFactory()).setMp4ExtractorFlags(1);
+                mediaSource = (new com.google.android.exoplayer2.source.ExtractorMediaSource.Factory(new JarDataSourceFactory(filePath, fileOffset))).setExtractorsFactory(defaultExtractorsFactory).createMediaSource(uri);
+            }
         }
+
+        return (MediaSource)mediaSource;
     }
 
     protected boolean OpenVideoFromFileInternal(String filePath, long fileOffset, String httpHeaderJson, int forcedFileFormat) {
         boolean success = false;
+        if (this.m_bDebugLogStateChange) {
+            Log.e("AVProVideo", "OpenVideoFromFileInternal | m_ExoPlayer.getPlaybackState() = " + (this.m_ExoPlayer != null ? this.m_ExoPlayer.getPlaybackState() : null) + " | m_VideoState = " + this.m_VideoState + " | m_SurfaceTexture = " + this.m_SurfaceTexture);
+        }
+
         this.m_ForcedFileFormat = forcedFileFormat;
-        if (this.m_ExoPlayer != null && this.m_VideoState != 2 && this.m_SurfaceTexture != null) {
-            MediaSource mediaSource;
-            if ((mediaSource = this.BuildMediaSource(filePath, fileOffset)) != null) {
+        if (!this.m_bSurfaceTextureBound.get()) {
+            this.BindSurfaceToPlayer();
+        }
+
+        if (this.m_ExoPlayer != null && this.m_VideoState != 2 && this.m_ExoPlayer.getPlaybackState() == 1 && this.m_bSurfaceTextureBound.get()) {
+            this.m_ExoPlayer.setPlayWhenReady(false);
+            this.m_MediaSource = this.BuildMediaSource(filePath, fileOffset, httpHeaderJson);
+            if (this.m_MediaSource != null) {
                 this.m_LastAbsoluteTime = 0L;
                 this.m_VideoState = 2;
-                this.BindSurfaceToPlayer();
-                this.m_ExoPlayer.prepare(mediaSource, true, true);
+                this.m_ExoPlayer.prepare(this.m_MediaSource, true, true);
                 success = true;
+            } else {
+                System.out.println("[AVProVideo] error failed to prepare");
             }
 
             this.m_PendingFilePath = null;
@@ -591,9 +748,19 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     }
 
     protected void _play() {
+        if (this.m_bDebugLogStateChange) {
+            Log.e("AVProVideo", "_play called");
+        }
+
         if (this.m_ExoPlayer != null) {
+            if (this.m_VideoState == 0) {
+                this.m_VideoState = 2;
+                this.m_ExoPlayer.prepare(this.m_MediaSource, false, false);
+            } else {
+                this.m_VideoState = 5;
+            }
+
             this.m_ExoPlayer.setPlayWhenReady(true);
-            this.m_VideoState = 5;
             if (this.m_AudioEngine != null) {
                 this.m_AudioEngine.start();
             }
@@ -602,6 +769,10 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     }
 
     protected void _pause() {
+        if (this.m_bDebugLogStateChange) {
+            Log.e("AVProVideo", "_pause called : m_VideoState = " + this.m_VideoState);
+        }
+
         if (this.m_ExoPlayer != null && this.m_VideoState != 6 && this.m_VideoState != 8) {
             this.m_ExoPlayer.setPlayWhenReady(false);
             this.m_VideoState = 7;
@@ -627,7 +798,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
                 this.m_AudioEngine.suspend();
             }
 
-            if (this.m_VideoState < 6) {
+            if (this.m_VideoState != 6) {
                 this.m_ExoPlayer.stop();
             }
 
@@ -690,15 +861,15 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     }
 
     protected void BindSurfaceToPlayer() {
-        if (this.m_ExoPlayer != null) {
-            if (this.m_Surface != null) {
-                this.m_ExoPlayer.clearVideoSurface();
-                this.m_Surface.release();
-                this.m_Surface = null;
-            }
+        if (this.m_Surface != null) {
+            this.m_Surface_ToBeReleased = this.m_Surface;
+            this.m_Surface = null;
+        }
 
-            this.m_Surface = new Surface(this.m_SurfaceTexture);
-            this.m_ExoPlayer.setVideoSurface(this.m_Surface);
+        this.m_bUpdateSurface.set(true);
+        this.m_bSurfaceTextureBound.set(false);
+        if (this.m_bDebugLogStateChange) {
+            Log.e("AVProVideo", "BindSurfaceToPlayer called");
         }
 
     }
@@ -706,78 +877,96 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     public void onPlayerStateChanged(boolean playWhenReady, int state) {
         switch(state) {
             case 1:
-                this.m_bIsBuffering = false;
-                if (this.m_VideoState != 2) {
-                    this.m_VideoState = 0;
-                    return;
+                if (this.m_bDebugLogStateChange) {
+                    System.out.println("AVProVideo video state: idle");
                 }
-                break;
+
+                this.m_bIsBuffering = false;
+                this.m_VideoState = 0;
+                return;
             case 2:
+                if (this.m_bDebugLogStateChange) {
+                    System.out.println("AVProVideo video state: buffering");
+                }
+
                 if (this.m_VideoState != 2) {
                     this.m_VideoState = 4;
-                    this.m_bIsBuffering = true;
-                    return;
                 }
 
-                System.out.println("AVProVideo buffer preparing");
+                this.m_bIsBuffering = true;
                 return;
             case 3:
-                if (this.m_bIsBuffering) {
-                    this.m_bIsBuffering = false;
-                    this.m_VideoState = this.m_ExoPlayer.getPlayWhenReady() ? 5 : 7;
-                    return;
+                if (this.m_bDebugLogStateChange) {
+                    System.out.println("AVProVideo video state: ready | m_VideoState: " + this.m_VideoState + " | m_bIsBuffering: " + this.m_bIsBuffering);
                 }
 
+                this.m_bIsBuffering = false;
                 if (this.m_PendingFilePath != null && this.m_PendingFilePath.length() > 0) {
-                    this.OpenVideoFromFile(this.m_PendingFilePath, 0L, "", this.m_ForcedFileFormat);
-                    return;
-                }
-
-                boolean bDoSetup = false;
-                if (this.m_VideoState == 2) {
-                    this.m_VideoState = 3;
+                    if (this.m_bDebugLogStateChange) {
+                        System.out.println("AVProVideo video state: has pending file path");
+                        return;
+                    }
+                } else if (this.m_VideoState >= 2) {
+                    this.m_VideoState = this.m_VideoState == 2 ? 3 : this.m_VideoState;
                     Format videoFormat = this.m_ExoPlayer.getVideoFormat();
                     Format audioFormat = this.m_ExoPlayer.getAudioFormat();
-                    if (videoFormat != null) {
-                        this.m_fSourceVideoFrameRate = videoFormat.frameRate;
-                        if (this.m_fSourceVideoFrameRate > 0.0F) {
-                            this.m_DisplayRate_FrameRate = this.m_fSourceVideoFrameRate;
+                    if (videoFormat == null) {
+                        if (audioFormat != null) {
+                            this.m_DisplayRate_FrameRate = this.m_fSourceVideoFrameRate = audioFormat.frameRate;
+                            this.m_bSourceHasVideo = false;
+                            this.m_bSourceHasAudio = true;
+                            this.m_Width = 0;
+                            this.m_Height = 0;
+                            this.m_DurationMs = this.m_ExoPlayer.getDuration();
+                            this.m_VideoState = this.m_ExoPlayer.getPlayWhenReady() ? 5 : 6;
+                            this.m_bVideo_AcceptCommands.set(true);
                         }
 
-                        this.m_DurationMs = this.m_ExoPlayer.getDuration();
-                        if (videoFormat.rotationDegrees == 90 || videoFormat.rotationDegrees == 270) {
-                            this.m_Width = videoFormat.height;
-                            this.m_Height = videoFormat.width;
-                        }
-
-                        if (this.m_Width > 0 && this.m_Height > 0) {
-                            this.m_bSourceHasVideo = true;
-                            this.m_bVideo_CreateRenderSurface = true;
-                            this.m_bVideo_DestroyRenderSurface = false;
-                        }
-
-                        bDoSetup = true;
-                    } else if (audioFormat != null) {
-                        this.m_DisplayRate_FrameRate = this.m_fSourceVideoFrameRate = audioFormat.frameRate;
-                        this.m_Width = 0;
-                        this.m_Height = 0;
-                        this.m_DurationMs = this.m_ExoPlayer.getDuration();
-                        bDoSetup = true;
+                        return;
                     }
-                }
 
-                if (bDoSetup) {
-                    this.m_VideoState = this.m_ExoPlayer.getPlayWhenReady() ? 5 : 7;
-                    this.m_bVideo_AcceptCommands = true;
+                    this.m_fSourceVideoFrameRate = videoFormat.frameRate;
+                    if (this.m_fSourceVideoFrameRate > 0.0F) {
+                        this.m_DisplayRate_FrameRate = this.m_fSourceVideoFrameRate;
+                    }
+
+                    this.m_DurationMs = this.m_ExoPlayer.getDuration();
+                    this.m_bSourceHasVideo = true;
+                    this.m_bSourceHasAudio = audioFormat != null;
+                    (new StringBuilder("videoFormat.rotationDegrees = ")).append(videoFormat.rotationDegrees);
+                    if (videoFormat.rotationDegrees == 90 || videoFormat.rotationDegrees == 270) {
+                        int newWidth = videoFormat.height;
+                        int newHeight = videoFormat.width;
+                        if (this.m_Width > 0 && this.m_Height > 0 && (newWidth != this.m_Width || newHeight != this.m_Height) && this.m_bVideo_RenderSurfaceCreated.get()) {
+                            synchronized(this) {
+                                this.m_Width = newWidth;
+                                this.m_Height = newHeight;
+                                this.m_bVideo_DestroyRenderSurface.set(true);
+                                this.m_bVideo_CreateRenderSurface.set(true);
+                            }
+                        }
+                    }
+
+                    this.m_VideoState = this.m_ExoPlayer.getPlayWhenReady() ? 5 : 6;
+                    this.m_bVideo_AcceptCommands.set(true);
+                    return;
                 }
 
                 return;
             case 4:
+                if (this.m_bDebugLogStateChange) {
+                    System.out.println("AVProVideo video state: ended");
+                }
+
                 this.m_VideoState = 8;
+                break;
             default:
-                this.m_bIsBuffering = false;
+                if (this.m_bDebugLogStateChange) {
+                    System.out.println("AVProVideo video state: " + state);
+                }
         }
 
+        this.m_bIsBuffering = false;
     }
 
     public void onLoadingChanged(boolean isLoading) {
@@ -798,7 +987,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
 
     public void onPlayerError(ExoPlaybackException e) {
         System.out.println("AVProVideo error " + e.getMessage());
-        if (this.m_VideoState < 5 && this.m_VideoState > 0) {
+        if (this.m_VideoState > 0 && this.m_VideoState < 5) {
             this.m_iLastError = 100;
         }
 
@@ -809,6 +998,8 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
         if (this.m_ExoPlayer != null && this.m_TrackSelector != null) {
             MappedTrackInfo trackinfo;
             if ((trackinfo = this.m_TrackSelector.getCurrentMappedTrackInfo()) != null) {
+                (new StringBuilder("Number of tracks in source: ")).append(trackinfo.getRendererCount());
+
                 for(int i = 0; i < trackinfo.getRendererCount(); ++i) {
                     if (this.m_ExoPlayer.getRendererType(i) == 1) {
                         TrackGroupArray trackGroups = trackinfo.getTrackGroups(i);
@@ -816,142 +1007,26 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
                     }
                 }
 
+                (new StringBuilder("Number of audio tracks in source: ")).append(this.m_iNumberAudioTracks);
                 if (this.m_iCurrentAudioTrackIndex < 0) {
                     this.m_iCurrentAudioTrackIndex = 0;
                 }
 
             }
         }
-
-        // DEBUG
-        if (ignored != null) {
-           for (int i = 0; i < ignored.length; i++) {
-               TrackGroup tg = ignored.get(i);
-               if (tg != null) {
-                   for (int j = 0; j < tg.length; j++) {
-                       Format f = tg.getFormat(j);
-                       if (f != null) {
-                           System.out.println("AVPro onTracksChanged: " + f.toString());
-                       }
-                   }
-               }
-           }
-        }
-
-         MappedTrackInfo mappedTrackInfo;
-        if ((mappedTrackInfo = this.m_TrackSelector.getCurrentMappedTrackInfo()) != null) {
-            int groupIndex;
-            String adaptiveSupport;
-            for(int rendererIndex = 0; rendererIndex < mappedTrackInfo.length; ++rendererIndex) {
-                TrackGroupArray rendererTrackGroups = mappedTrackInfo.getTrackGroups(rendererIndex);
-                TrackSelection trackSelection = trackSelections.get(rendererIndex);
-                if (rendererTrackGroups.length > 0) {
-                    System.out.println((new StringBuilder("  Renderer:")).append(rendererIndex).append(" ["));
-
-                    for(groupIndex = 0; groupIndex < rendererTrackGroups.length; ++groupIndex) {
-                        TrackGroup trackGroup;
-                        int var10000 = (trackGroup = rendererTrackGroups.get(groupIndex)).length;
-                        int var14 = mappedTrackInfo.getAdaptiveSupport(rendererIndex, groupIndex, false);
-                        String var21;
-                        if (var10000 < 2) {
-                            var21 = "N/A";
-                        } else {
-                            switch(var14) {
-                                case 0:
-                                    var21 = "NO";
-                                    break;
-                                case 8:
-                                    var21 = "YES_NOT_SEAMLESS";
-                                    break;
-                                case 16:
-                                    var21 = "YES";
-                                    break;
-                                default:
-                                    var21 = "?";
-                            }
-                        }
-
-                        adaptiveSupport = var21;
-                        System.out.println((new StringBuilder("    Group:")).append(groupIndex).append(", adaptive_supported=").append(adaptiveSupport).append(" ["));
-
-                        for(int trackIndex = 0; trackIndex < trackGroup.length; ++trackIndex) {
-                            String status = getTrackStatusString(trackSelection != null && trackSelection.getTrackGroup() == trackGroup && trackSelection.indexOf(trackIndex) != -1);
-                            String formatSupport = getFormatSupportString(mappedTrackInfo.getTrackFormatSupport(rendererIndex, groupIndex, trackIndex));
-                            System.out.println((new StringBuilder("      ")).append(status).append(" Track:").append(trackIndex).append(", ").append(Format.toLogString(trackGroup.getFormat(trackIndex))).append(", supported=").append(formatSupport));
-                        }
-                    }
-//
-//                    if (trackSelection != null) {
-//                        for(groupIndex = 0; groupIndex < trackSelection.length(); ++groupIndex) {
-//                            Metadata metadata;
-//                            if ((metadata = trackSelection.getFormat(groupIndex).metadata) != null) {
-//                                printMetadata(metadata, "      ");
-//                                break;
-//                            }
-//                        }
-//                    }
-                }
-            }
-
-            TrackGroupArray unassociatedTrackGroups;
-            if ((unassociatedTrackGroups = mappedTrackInfo.getUnassociatedTrackGroups()).length > 0) {
-                for(groupIndex = 0; groupIndex < unassociatedTrackGroups.length; ++groupIndex) {
-                    System.out.println((new StringBuilder("    Group:")).append(groupIndex).append(" ["));
-                    TrackGroup trackGroup = unassociatedTrackGroups.get(groupIndex);
-
-                    for(int groupIndex2 = 0; groupIndex2 < trackGroup.length; ++groupIndex2) {
-                        String status = getTrackStatusString(false);
-                        adaptiveSupport = getFormatSupportString(0);
-                        System.out.println((new StringBuilder("      ")).append(status).append(" Track:").append(groupIndex2).append(", ").append(Format.toLogString(trackGroup.getFormat(groupIndex2))).append(", supported=").append(adaptiveSupport));
-                    }
-                }
-            }
-
-        }
-    }
-
-    private static String getFormatSupportString(int formatSupport) {
-        switch(formatSupport) {
-            case 0:
-                return "NO";
-            case 1:
-                return "NO_UNSUPPORTED_TYPE";
-            case 2:
-            default:
-                return "?";
-            case 3:
-                return "NO_EXCEEDS_CAPABILITIES";
-            case 4:
-                return "YES";
-        }
-    }
-
-    private static String getTrackStatusString(boolean enabled) {
-        return enabled ? "[X]" : "[ ]";
-    }
-    public void onLoadError(IOException error) {
-        if (this.m_VideoState > 5 && this.m_VideoState > 0) {
-            this.m_iLastError = 100;
-        }
-
     }
 
     public void onLoadError(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData, IOException error, boolean wasCanceled) {
+        (new StringBuilder("onLoadError (param version) : error = ")).append(error);
     }
 
     public void onLoadCanceled(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
     }
 
     public void onLoadStarted(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
-        if (mediaLoadData != null && mediaLoadData.trackFormat != null) {
-//            System.out.println("AVPro onLoadStarted: " + mediaLoadData.trackFormat.toString());
-        }
     }
 
     public void onLoadCompleted(int windowIndex, MediaPeriodId mediaPeriodId, LoadEventInfo loadEventInfo, MediaLoadData mediaLoadData) {
-        if (mediaLoadData != null && mediaLoadData.trackFormat != null) {
-            System.out.println("AVPro onLoadCompleted: " + mediaLoadData.trackFormat.toString());
-        }
     }
 
     public void onUpstreamDiscarded(int windowIndex, MediaPeriodId mediaPeriodId, MediaLoadData mediaLoadData) {
@@ -976,21 +1051,10 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
     }
 
     protected void UpdateVideoMetadata() {
-        if (this.m_Context != null) {
-            ((Activity)this.m_Context).runOnUiThread(new Runnable() {
-                public final void run() {
-                    Format videoFormat;
-                    if (AVProVideoExoPlayer.this.m_fSourceVideoFrameRate < 0.0F && AVProVideoExoPlayer.this.m_ExoPlayer != null && (videoFormat = AVProVideoExoPlayer.this.m_ExoPlayer.getVideoFormat()) != null) {
-                        AVProVideoExoPlayer.this.m_fSourceVideoFrameRate = videoFormat.frameRate;
-                    }
-
-                }
-            });
+        Format videoFormat;
+        if (this.m_fSourceVideoFrameRate < 0.0F && this.m_ExoPlayer != null && (videoFormat = this.m_ExoPlayer.getVideoFormat()) != null) {
+            this.m_fSourceVideoFrameRate = videoFormat.frameRate;
         }
-    }
 
-    @Override
-    public void onBandwidthSample(int elapsedMs, long bytes, long bitrate) {
-        System.out.printf("AVPro: Bitrate Estimate: %d (%d bytes in %dms)\n", bitrate, bytes, elapsedMs);
     }
 }

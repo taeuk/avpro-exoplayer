@@ -8,13 +8,14 @@ package com.RenderHeads.AVProVideo;
 import android.net.Uri;
 import com.google.android.exoplayer2.upstream.DataSource;
 import com.google.android.exoplayer2.upstream.DataSpec;
+import com.google.android.exoplayer2.upstream.TransferListener;
 import com.google.android.exoplayer2.upstream.AssetDataSource.AssetDataSourceException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-public final class JarDataSource implements DataSource {
+public class JarDataSource implements DataSource {
     private static final String[] extensions = new String[]{"obb!/", "apk!/"};
     private Uri m_Uri;
     private String m_Path;
@@ -30,7 +31,10 @@ public final class JarDataSource implements DataSource {
         this.m_ZipFile = null;
     }
 
-    public final void close() {
+    public void addTransferListener(TransferListener transferListener) {
+    }
+
+    public void close() {
         if (this.m_File != null) {
             try {
                 this.m_File.close();
@@ -51,11 +55,11 @@ public final class JarDataSource implements DataSource {
         this.m_File = null;
     }
 
-    public final Uri getUri() {
+    public Uri getUri() {
         return this.m_Uri;
     }
 
-    public final long open(DataSpec dataSpec) throws AssetDataSourceException {
+    public long open(DataSpec dataSpec) throws AssetDataSourceException {
         if (this.m_Uri == null) {
             return 0L;
         } else {
@@ -76,11 +80,12 @@ public final class JarDataSource implements DataSource {
 
                         this.m_File = this.m_ZipFile.getInputStream(entry);
                         fileSize = entry.getSize() - this.m_FileOffset;
-                        if (this.m_File.skip(dataSpec.position + this.m_FileOffset) < dataSpec.position) {
+                        long iSkipAmount = dataSpec.position + this.m_FileOffset;
+                        if (this.m_File.skip(iSkipAmount) < iSkipAmount) {
                             throw new AssetDataSourceException(new IOException("End of file reached"));
                         }
-                    } catch (IOException var10) {
-                        throw new AssetDataSourceException(var10);
+                    } catch (IOException var12) {
+                        throw new AssetDataSourceException(var12);
                     }
 
                     if (this.m_File != null) {
@@ -97,7 +102,7 @@ public final class JarDataSource implements DataSource {
         }
     }
 
-    public final int read(byte[] buffer, int offset, int readLength) throws IOException {
+    public int read(byte[] buffer, int offset, int readLength) throws IOException {
         if (this.m_File == null) {
             return 0;
         } else {

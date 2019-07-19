@@ -5,6 +5,7 @@
 
 package com.RenderHeads.AVProVideo;
 
+import android.annotation.TargetApi;
 import android.content.res.AssetFileDescriptor;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -60,6 +61,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
         this.m_aTrackInfo = null;
         if (this.m_MediaPlayer != null) {
             this.m_MediaPlayer.reset();
+            this.m_VideoState = 0;
         }
 
     }
@@ -136,20 +138,28 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
             boolean bFileGood = true;
 
             try {
-                if (!filePath.toLowerCase().startsWith("http://") && !filePath.toLowerCase().startsWith("https://") && !filePath.toLowerCase().startsWith("rtsp://")) {
+                String lowerFilePath;
+                if (!(lowerFilePath = filePath.toLowerCase()).startsWith("http://") && !lowerFilePath.startsWith("https://") && !lowerFilePath.startsWith("rtmp://") && !lowerFilePath.startsWith("rtsp://")) {
+                    String strippedFilePath = filePath;
+                    if (filePath.startsWith("file:/")) {
+                        strippedFilePath = filePath.substring(6);
+                    }
+
+                    String fileName;
                     try {
                         String lookFor = ".obb!/";
                         int iIndexIntoString;
-                        if ((iIndexIntoString = filePath.lastIndexOf(lookFor)) < 0) {
+                        if ((iIndexIntoString = strippedFilePath.lastIndexOf(lookFor)) < 0) {
                             throw new IOException("Not an obb file");
                         }
 
-                        String zipPathName = filePath.substring(11, iIndexIntoString + lookFor.length() - 2);
-                        String zipFileName = filePath.substring(iIndexIntoString + lookFor.length());
-                        this.setMediaPlayerDataSourceFromZip(zipPathName, zipFileName);
-                    } catch (IOException var18) {
+                        fileName = strippedFilePath.substring(11, iIndexIntoString + lookFor.length() - 2);
+                        String zipFileName = strippedFilePath.substring(iIndexIntoString + lookFor.length());
+                        this.setMediaPlayerDataSourceFromZip(fileName, zipFileName, fileOffset);
+                    } catch (IOException var46) {
                         try {
-                            String fileName = filePath.substring(filePath.lastIndexOf("/assets/") + 8);
+                            String searchString = "/assets/";
+                            fileName = strippedFilePath.substring(strippedFilePath.lastIndexOf(searchString) + searchString.length());
                             AssetFileDescriptor assetFileDesc;
                             if ((assetFileDesc = this.m_Context.getAssets().openFd(fileName)) != null) {
                                 this.m_MediaPlayer.setDataSource(assetFileDesc.getFileDescriptor(), assetFileDesc.getStartOffset() + fileOffset, assetFileDesc.getLength() - fileOffset);
@@ -158,52 +168,90 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                                     try {
                                         this.m_MediaExtractor.setDataSource(assetFileDesc.getFileDescriptor(), assetFileDesc.getStartOffset() + fileOffset, assetFileDesc.getLength() - fileOffset);
-                                    } catch (IOException var15) {
+                                    } catch (IOException var41) {
                                         this.m_MediaExtractor.release();
                                         this.m_MediaExtractor = null;
                                     }
                                 }
                             }
-                        } catch (IOException var17) {
+                        } catch (IOException var45) {
                             try {
+                                FileInputStream inputStream;
                                 FileDescriptor fileDescriptor;
                                 if (fileOffset == 0L) {
-                                    fileDescriptor = (new FileInputStream(filePath)).getFD();
-                                    this.m_MediaPlayer.setDataSource(fileDescriptor);
-                                    if (VERSION.SDK_INT > 15) {
-                                        this.m_MediaExtractor = new MediaExtractor();
+                                    inputStream = null;
+                                    boolean var37 = false;
 
-                                        try {
-                                            this.m_MediaExtractor.setDataSource(fileDescriptor);
-                                        } catch (IOException var14) {
-                                            this.m_MediaExtractor.release();
-                                            this.m_MediaExtractor = null;
+                                    try {
+                                        var37 = true;
+                                        fileDescriptor = (inputStream = new FileInputStream(strippedFilePath)).getFD();
+                                        this.m_MediaPlayer.setDataSource(fileDescriptor);
+                                        if (VERSION.SDK_INT > 15) {
+                                            this.m_MediaExtractor = new MediaExtractor();
+
+                                            try {
+                                                this.m_MediaExtractor.setDataSource(fileDescriptor);
+                                                var37 = false;
+                                            } catch (IOException var40) {
+                                                this.m_MediaExtractor.release();
+                                                this.m_MediaExtractor = null;
+                                                var37 = false;
+                                            }
+                                        } else {
+                                            var37 = false;
+                                        }
+                                    } finally {
+                                        if (var37) {
+                                            if (inputStream != null) {
+                                                inputStream.close();
+                                            }
+
                                         }
                                     }
+
+                                    inputStream.close();
                                 } else {
-                                    FileInputStream inputStream;
-                                    fileDescriptor = (inputStream = new FileInputStream(filePath)).getFD();
-                                    this.m_MediaPlayer.setDataSource(fileDescriptor, fileOffset, inputStream.getChannel().size() - fileOffset);
-                                    if (VERSION.SDK_INT > 15) {
-                                        this.m_MediaExtractor = new MediaExtractor();
+                                    inputStream = null;
+                                    boolean var26 = false;
 
-                                        try {
-                                            this.m_MediaExtractor.setDataSource(fileDescriptor, fileOffset, inputStream.getChannel().size() - fileOffset);
-                                        } catch (IOException var13) {
-                                            this.m_MediaExtractor.release();
-                                            this.m_MediaExtractor = null;
+                                    try {
+                                        var26 = true;
+                                        fileDescriptor = (inputStream = new FileInputStream(strippedFilePath)).getFD();
+                                        this.m_MediaPlayer.setDataSource(fileDescriptor, fileOffset, inputStream.getChannel().size() - fileOffset);
+                                        if (VERSION.SDK_INT > 15) {
+                                            this.m_MediaExtractor = new MediaExtractor();
+
+                                            try {
+                                                this.m_MediaExtractor.setDataSource(fileDescriptor, fileOffset, inputStream.getChannel().size() - fileOffset);
+                                                var26 = false;
+                                            } catch (IOException var39) {
+                                                this.m_MediaExtractor.release();
+                                                this.m_MediaExtractor = null;
+                                                var26 = false;
+                                            }
+                                        } else {
+                                            var26 = false;
+                                        }
+                                    } finally {
+                                        if (var26) {
+                                            if (inputStream != null) {
+                                                inputStream.close();
+                                            }
+
                                         }
                                     }
+
+                                    inputStream.close();
                                 }
-                            } catch (IOException var16) {
-                                Uri uri = Uri.parse("file://" + filePath);
+                            } catch (IOException var44) {
+                                Uri uri = Uri.parse("file:/" + strippedFilePath);
                                 this.m_MediaPlayer.setDataSource(this.m_Context, uri);
                                 if (VERSION.SDK_INT > 15) {
                                     this.m_MediaExtractor = new MediaExtractor();
 
                                     try {
                                         this.m_MediaExtractor.setDataSource(this.m_Context, uri, (Map)null);
-                                    } catch (IOException var12) {
+                                    } catch (IOException var38) {
                                         this.m_MediaExtractor.release();
                                         this.m_MediaExtractor = null;
                                     }
@@ -212,18 +260,17 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
                         }
                     }
                 } else {
-                    Uri uri = Uri.parse(filePath);
                     if (httpHeaderJson != null && !httpHeaderJson.isEmpty()) {
                         Map<String, String> httpHeaderMap = GetJsonAsMap(httpHeaderJson);
-                        this.m_MediaPlayer.setDataSource(this.m_Context, uri, httpHeaderMap);
+                        this.m_MediaPlayer.setDataSource(this.m_Context, Uri.parse(filePath), httpHeaderMap);
                     } else {
-                        this.m_MediaPlayer.setDataSource(this.m_Context, uri);
+                        this.m_MediaPlayer.setDataSource(filePath);
                     }
 
                     this.m_bIsStream = true;
                 }
-            } catch (IOException var19) {
-                (new StringBuilder("Failed to open video file: ")).append(var19);
+            } catch (IOException var47) {
+                (new StringBuilder("Failed to open video file: ")).append(var47);
                 bFileGood = false;
             }
 
@@ -236,6 +283,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
                 this.m_MediaPlayer.setOnInfoListener(this);
                 this.m_MediaPlayer.setLooping(this.m_bLooping);
                 this.m_VideoState = 2;
+                this.m_bIsBuffering = true;
                 this.m_MediaPlayer.prepareAsync();
             } else {
                 this.m_iLastError = 100;
@@ -283,8 +331,8 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
         if (VERSION.SDK_INT > 15 && this.m_MediaPlayer != null && iTrackIndex < this.m_iNumberAudioTracks && iTrackIndex != this.m_iCurrentAudioTrackIndex) {
             int iAudioTrack = 0;
             int iTrack = 0;
-            TrackInfo[] var4 = this.m_aTrackInfo;
-            int var5 = this.m_aTrackInfo.length;
+            TrackInfo[] var4;
+            int var5 = (var4 = this.m_aTrackInfo).length;
 
             for(int var6 = 0; var6 < var5; ++var6) {
                 TrackInfo info;
@@ -343,6 +391,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
     }
 
+    @TargetApi(26)
     protected void _seek(int timeMs) {
         if (this.m_MediaPlayer != null) {
             if (VERSION.SDK_INT >= 26) {
@@ -355,6 +404,7 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
     }
 
+    @TargetApi(26)
     protected void _seekFast(int timeMs) {
         if (this.m_MediaPlayer != null) {
             if (VERSION.SDK_INT >= 26) {
@@ -420,27 +470,43 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
         throw new RuntimeException(String.format("File \"%s\"not found in zip", fileNameInZip));
     }
 
-    private void setMediaPlayerDataSourceFromZip(String zipFileName, String fileNameInZip) throws IOException {
+    private void setMediaPlayerDataSourceFromZip(String zipFileName, String fileNameInZip, long fileOffset) throws IOException {
         if (this.m_MediaPlayer != null) {
-            ZipResourceFile zip = new ZipResourceFile(zipFileName);
-            FileInputStream fis = new FileInputStream(zipFileName);
+            FileInputStream fis = null;
+            boolean var12 = false;
 
             try {
-                FileDescriptor zipfd = fis.getFD();
+                var12 = true;
+                ZipResourceFile zip = new ZipResourceFile(zipFileName);
+                FileDescriptor zipfd = (fis = new FileInputStream(zipFileName)).getFD();
                 ZipEntryRO entry = zipFindFile(zip, fileNameInZip);
-                this.m_MediaPlayer.setDataSource(zipfd, entry.mOffset, entry.mUncompressedLength);
-                if (VERSION.SDK_INT > 15 && this.m_MediaExtractor != null) {
-                    try {
-                        this.m_MediaExtractor.setDataSource(zipfd, entry.mOffset, entry.mUncompressedLength);
-                    } catch (IOException var10) {
-                        this.m_MediaExtractor.release();
-                        this.m_MediaExtractor = null;
+                this.m_MediaPlayer.setDataSource(zipfd, entry.mOffset + fileOffset, entry.mUncompressedLength - fileOffset);
+                if (VERSION.SDK_INT > 15) {
+                    if (this.m_MediaExtractor != null) {
+                        try {
+                            this.m_MediaExtractor.setDataSource(zipfd, entry.mOffset + fileOffset, entry.mUncompressedLength - fileOffset);
+                            var12 = false;
+                        } catch (IOException var13) {
+                            this.m_MediaExtractor.release();
+                            this.m_MediaExtractor = null;
+                            var12 = false;
+                        }
+                    } else {
+                        var12 = false;
                     }
+                } else {
+                    var12 = false;
                 }
             } finally {
-                fis.close();
+                if (var12) {
+                    if (fis != null) {
+                        fis.close();
+                    }
+
+                }
             }
 
+            fis.close();
         }
     }
 
@@ -467,11 +533,14 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
         return result;
     }
 
+    @TargetApi(19)
     public void onPrepared(MediaPlayer mp) {
         this.m_VideoState = 3;
+        this.m_bIsBuffering = false;
         this.UpdateGetDuration();
         if (this.m_bIsStream) {
             this.m_iNumberAudioTracks = 1;
+            this.m_bSourceHasAudio = true;
         }
 
         if (this.m_MediaPlayer != null && VERSION.SDK_INT > 15) {
@@ -482,8 +551,8 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
                     if (this.m_aTrackInfo.length > 0) {
                         this.m_iNumberAudioTracks = 0;
                         int iTrack = 0;
-                        TrackInfo[] var3 = this.m_aTrackInfo;
-                        int var4 = this.m_aTrackInfo.length;
+                        TrackInfo[] var3;
+                        int var4 = (var3 = this.m_aTrackInfo).length;
 
                         for(int var5 = 0; var5 < var4; ++var5) {
                             TrackInfo info;
@@ -523,18 +592,18 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
 
                         if (this.m_iNumberAudioTracks > 0) {
                             this.SetAudioTrack(0);
+                            this.m_bSourceHasAudio = true;
                         }
 
                         (new StringBuilder("Number of audio tracks in source: ")).append(this.m_iNumberAudioTracks);
                     }
                 }
             } catch (Exception var8) {
-                ;
             }
         }
 
-        if (this.m_bIsStream || this.m_iNumberAudioTracks > 0 || this.m_bVideo_RenderSurfaceCreated && !this.m_bVideo_DestroyRenderSurface && !this.m_bVideo_CreateRenderSurface) {
-            this.m_bVideo_AcceptCommands = true;
+        if (this.m_bIsStream || this.m_iNumberAudioTracks > 0 || this.m_bVideo_RenderSurfaceCreated.get() && !this.m_bVideo_DestroyRenderSurface.get() && !this.m_bVideo_CreateRenderSurface.get()) {
+            this.m_bVideo_AcceptCommands.set(true);
             if (this.m_VideoState != 5 && this.m_VideoState != 4) {
                 this.m_VideoState = 6;
             }
@@ -552,8 +621,8 @@ public class AVProVideoMediaPlayer extends AVProVideoPlayer implements OnBufferi
             this.m_Width = width;
             this.m_Height = height;
             this.m_bSourceHasVideo = true;
-            this.m_bVideo_CreateRenderSurface = true;
-            this.m_bVideo_DestroyRenderSurface = false;
+            this.m_bVideo_CreateRenderSurface.set(true);
+            this.m_bVideo_DestroyRenderSurface.set(true);
         }
 
     }

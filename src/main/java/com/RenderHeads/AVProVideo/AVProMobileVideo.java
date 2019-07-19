@@ -22,7 +22,7 @@ import javax.microedition.khronos.egl.EGLContext;
 
 public class AVProMobileVideo {
     private final boolean m_bWatermarked = false;
-    private final String PLUGIN_VERSION = "1.9.10";
+    private final String PLUGIN_VERSION = "1.10.0";
     public static final int MEDIAPLAYER = 1;
     public static final int EXOPLAYER = 2;
     public static final int kUnityGfxRendererOpenGLES20 = 8;
@@ -63,7 +63,7 @@ public class AVProMobileVideo {
     }
 
     public String GetPluginVersion() {
-        return "1.9.10";
+        return "1.10.0";
     }
 
     public AVProVideoPlayer CreatePlayer(int api, boolean useOesRenderingPath, boolean enableAudio360, int audio360Channels, boolean preferSoftware) {
@@ -90,7 +90,8 @@ public class AVProMobileVideo {
                         return (AVProVideoPlayer)this.m_Players.get(index);
                     case 2:
                         AVProVideoExoPlayer exoplayer;
-                        (exoplayer = new AVProVideoExoPlayer(index, false, this.m_Random)).Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels, preferSoftware);
+                        (exoplayer = new AVProVideoExoPlayer(index, false, this.m_Random)).m_bShowPosterFrame = false;
+                        exoplayer.Initialise(this.m_Context, useOesRenderingPath, enableAudio360, audio360Channels, preferSoftware);
                         this.m_Players.put(index, exoplayer);
                         return (AVProVideoPlayer)this.m_Players.get(index);
                     default:
