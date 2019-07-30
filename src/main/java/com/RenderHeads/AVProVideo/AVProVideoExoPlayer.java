@@ -280,13 +280,6 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
             }
 
             this.m_UserAgent = "AVProMobileVideo/" + version + " (Linux;Android " + VERSION.RELEASE + ") ExoPlayerLib/2.8.4";
-            Activity activity = (Activity)((Activity)this.m_Context);
-            this.m_BandwidthMeter = new DefaultBandwidthMeter();
-            this.m_MainHandler = new Handler(activity.getMainLooper());
-            this.m_MediaDataSourceFactory = this.BuildDataSourceFactory(true, (String)null);
-            this.m_AdaptiveTrackSelectionFactory = new Factory(this.m_BandwidthMeter);
-            this.m_TrackSelector = new DefaultTrackSelector(this.m_AdaptiveTrackSelectionFactory);
-            this.m_EventLogger = new EventLogger(this.m_TrackSelector);
 
             SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
             long maxInitBitrate = sharedPref.getLong(SAVED_MAX_INITIAL_BITRATE_KEY, 64000L);
@@ -296,6 +289,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
                     .setInitialBitrateEstimate(maxInitBitrate)
                     .build();
 
+            Activity activity = (Activity)this.m_Context;
             this.m_MainHandler = new Handler(activity.getMainLooper());
             this.m_MediaDataSourceFactory = this.BuildDataSourceFactory(true, "");
             this.m_AdaptiveTrackSelectionFactory = new AdaptiveTrackSelection.Factory(
@@ -308,9 +302,8 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
            this.m_TrackSelector = new DefaultTrackSelector(AVProVideoExoPlayer.this.m_AdaptiveTrackSelectionFactory);
            this.m_TrackSelector.setParameters(this.m_TrackSelector
                                               .buildUponParameters()
-                                              .setMaxVideoSize(4096, 4096)
-                                              .setMaxVideoBitrate(1024*1024*1024)
-                                              .setExceedRendererCapabilitiesIfNecessary(false));
+                                              .setMaxVideoSize(4096, 4096));
+            this.m_EventLogger = new EventLogger(this.m_TrackSelector);
 
             CustomDefaultRenderersFactory defaultRenderersFactory;
             RenderersFactory rFactory = defaultRenderersFactory = new CustomDefaultRenderersFactory(this.m_Context, (DrmSessionManager)null, 1, preferSoftwareDecoder);
