@@ -196,7 +196,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
 
             SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = sharedPref.edit();
-            editor.putLong(SAVED_MAX_INITIAL_BITRATE_KEY, height > 2000 ? 20000000 : 800000);
+            editor.putLong(SAVED_MAX_INITIAL_BITRATE_KEY, height > 2000 ? 20000000 : 10000000);
             editor.apply();
 
             switch(unappliedRotationDegrees) {
@@ -282,7 +282,7 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
             this.m_UserAgent = "AVProMobileVideo/" + version + " (Linux;Android " + VERSION.RELEASE + ") ExoPlayerLib/2.8.4";
 
             SharedPreferences sharedPref = m_Context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE);
-            long maxInitBitrate = sharedPref.getLong(SAVED_MAX_INITIAL_BITRATE_KEY, 64000L);
+            long maxInitBitrate = sharedPref.getLong(SAVED_MAX_INITIAL_BITRATE_KEY, 20000000L);
             System.out.println("AVProVideo: InitializePlayer with init bitrate " + maxInitBitrate);
 
             this.m_BandwidthMeter = new DefaultBandwidthMeter.Builder()
@@ -297,12 +297,10 @@ public class AVProVideoExoPlayer extends AVProVideoPlayer implements EventListen
                     2000,
                     AdaptiveTrackSelection.DEFAULT_MAX_DURATION_FOR_QUALITY_DECREASE_MS,
                     AdaptiveTrackSelection.DEFAULT_MIN_DURATION_TO_RETAIN_AFTER_DISCARD_MS,
-                    AdaptiveTrackSelection.DEFAULT_BANDWIDTH_FRACTION);
+                    0.9f);
 
            this.m_TrackSelector = new DefaultTrackSelector(AVProVideoExoPlayer.this.m_AdaptiveTrackSelectionFactory);
-           this.m_TrackSelector.setParameters(this.m_TrackSelector
-                                              .buildUponParameters()
-                                              .setMaxVideoSize(4096, 4096));
+           this.m_TrackSelector.setParameters(this.m_TrackSelector.buildUponParameters());
             this.m_EventLogger = new EventLogger(this.m_TrackSelector);
 
             CustomDefaultRenderersFactory defaultRenderersFactory;
